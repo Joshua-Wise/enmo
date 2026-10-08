@@ -8,7 +8,7 @@ import { notificationsSummary, reportQueued, testEmailSent } from '@/lib/notific
 import { InlineError, SectionHeader, StatusLine } from './section';
 
 interface NotificationsSectionProps {
-  /** False while no Admin token is stored: the status needs it to be read at all. */
+  /** True for an Admin: the status is an Admin's to read. */
   canEdit: boolean;
   onUnauthorised: () => void;
 }
@@ -36,7 +36,7 @@ export function NotificationsSection({ canEdit, onUnauthorised }: NotificationsS
       {canEdit ? (
         <NotificationStatusAndTest onUnauthorised={onUnauthorised} />
       ) : (
-        <p className="text-sm text-muted-foreground">Enter the Admin token above to see whether notifications are on and send a test email.</p>
+        <p className="text-sm text-muted-foreground">Only an Admin sees whether notifications are on and sends a test email.</p>
       )}
     </section>
   );

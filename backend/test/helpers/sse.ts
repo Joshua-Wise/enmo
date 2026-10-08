@@ -4,6 +4,8 @@
  * comments and messages separated by blank lines.
  */
 
+import { TEST_ADMIN_TOKEN } from './server';
+
 export type SseEvent = { kind: 'comment'; text: string } | { kind: 'message'; event: string; data: string } | { kind: 'retry'; ms: number };
 
 export interface SseClient {
@@ -36,10 +38,14 @@ function parseBlock(block: string): SseEvent {
   return { kind: 'message', event, data: data.join('\n') };
 }
 
-/** Open the stream at `url` with optional request headers and wait until the response headers arrive. */
+/**
+ * Open the stream at `url` and wait until the response headers arrive. It needs a credential
+ * (docs/adr/0010): the Admin token, unless `headers` carries a session cookie or its own Authorization.
+ */
 export async function subscribe(url: string, headers: Record<string, string> = {}): Promise<SseClient> {
   const controller = new AbortController();
-  const response = await fetch(url, { headers: { Accept: 'text/event-stream', ...headers }, signal: controller.signal });
+  const credential = 'Cookie' in headers || 'Authorization' in headers ? {} : { Authorization: `Bearer ${TEST_ADMIN_TOKEN}` };
+  const response = await fetch(url, { headers: { Accept: 'text/event-stream', ...credential, ...headers }, signal: controller.signal });
   if (response.body === null) throw new Error('The stream has no body');
 
   const queue: SseEvent[] = [];

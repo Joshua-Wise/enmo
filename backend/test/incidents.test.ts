@@ -400,7 +400,7 @@ describe('incidents', () => {
   describe('GET /api/incidents', () => {
     const window = (query: string) => client.incidents.fetch(query);
 
-    test('needs from and to as ISO instants, from before to, and at most eight days apart (422 otherwise), with no token', async () => {
+    test('needs from and to as ISO instants, from before to, and at most eight days apart (422 otherwise)', async () => {
       const cases: [string, RegExp][] = [
         ['', /from is required/],
         ['?from=2026-10-01T00:00:00Z', /to is required/],

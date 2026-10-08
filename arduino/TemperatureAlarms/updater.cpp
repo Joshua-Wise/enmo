@@ -2,7 +2,6 @@
 
 #include <Arduino.h>
 #include <ESP8266httpUpdate.h>
-#include <WiFiClientSecure.h>
 
 #include "config.h"
 #include "network.h"
@@ -65,31 +64,25 @@ void updaterBegin() {
   Serial.println(FPSTR(VERSION_MARKER));
   Serial.println(ARDUINO_SIGNING ? F("update: on, signed builds only, hourly")
                                  : F("update: off, this build is not signed (no public.key in the sketch folder)"));
+  ESPhttpUpdate.setAuthorization("device", DEVICE_TOKEN);  // Basic device:<token>, all the library can send
+  ESPhttpUpdate.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);  // the token goes only to SERVER_URL
+  ESPhttpUpdate.rebootOnUpdate(true);
   ESPhttpUpdate.onStart(imageStarted);
   ESPhttpUpdate.onEnd(imageInstalled);
 }
 
 static void check() {
-  ESPhttpUpdate.setAuthorization("device", DEVICE_TOKEN);  // Basic device:<token>, all the library can send
-  ESPhttpUpdate.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
-  ESPhttpUpdate.rebootOnUpdate(true);
   const String url = serverUrl("/api/firmware");
   const String version = String(FIRMWARE_VERSION);
   imageArrived = false;
-  t_httpUpdate_return result;
-  if (serverUsesTls()) {
-    BearSSL::WiFiClientSecure client;
-    const __FlashStringHelper* problem = serverSecure(client);
-    if (problem != nullptr) {
-      Serial.print(F("update: skipped, "));
-      Serial.println(problem);
-      lastResult = String(F("skipped, ")) + problem;
-      return;
-    }
-    result = ESPhttpUpdate.update(client, url, version);
-  } else {
-    WiFiClient client;
-    result = ESPhttpUpdate.update(client, url, version);
+  t_httpUpdate_return result = HTTP_UPDATE_NO_UPDATES;
+  const __FlashStringHelper* problem =
+      serverRequest([&](WiFiClient& client) { result = ESPhttpUpdate.update(client, url, version); });
+  if (problem != nullptr) {
+    Serial.print(F("update: skipped, "));
+    Serial.println(problem);
+    lastResult = String(F("skipped, ")) + problem;
+    return;
   }
   // HTTP_UPDATE_OK restarts the board inside update(), so it is never seen here.
   if (result == HTTP_UPDATE_NO_UPDATES) {

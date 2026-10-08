@@ -5,7 +5,9 @@
 //
 // SPREAD_ADDRESSES=1 sends a made-up X-Forwarded-For per context, for a local proxy that passes it through
 // (see a11y.mjs), so repeated runs do not meet the API's per-address read limit.
+// It signs in by keyboard as a throwaway Admin it adds with ADMIN_TOKEN, and deletes it at the end.
 import { chromium, firefox, webkit } from 'playwright';
+import { signInContext, throwawayUser } from './session.mjs';
 
 const WEB = process.env.WEB ?? 'http://localhost:8080';
 const ADMIN = process.env.ADMIN_TOKEN;
@@ -15,6 +17,7 @@ const engine = { chromium, firefox, webkit }[name];
 // WebKit, like Safari by default, leaves links out of Tab (Safari users turn on "Press Tab to highlight each item"),
 // and Playwright's WebKit has no way to turn that on, so the checks that Tab to a link are skipped there.
 const LINKS_TAB = name !== 'webkit';
+const typist = await throwawayUser(WEB, ADMIN, 'admin', 'keyboard');
 const browser = await engine.launch();
 const address = () => (process.env.SPREAD_ADDRESSES ? { extraHTTPHeaders: { 'x-forwarded-for': `10.4.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}` } } : {});
 
@@ -55,10 +58,23 @@ async function tabTo(pred, max = 60) {
 const insideDialog = () => page.evaluate(() => !!document.activeElement.closest('[role=alertdialog],[role=dialog]'));
 
 await page.goto(WEB + '/settings');
+await check('sign-in: by keyboard alone, the page asked for comes back after', async () => {
+  await page.getByRole('heading', { name: 'Sign in', level: 1 }).waitFor();
+  let a = await focused();
+  expect(a.tag === 'INPUT' && a.ring, 'focus does not start in the username field: ' + a.tag);
+  await page.keyboard.type(typist.username);
+  await key('Tab');
+  await page.keyboard.type(typist.password);
+  await key('Enter');
+  await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor({ timeout: 5000 });
+  a = await focused();
+  expect(a.tag !== 'INPUT', 'focus left in a field that is gone: ' + a.text);
+});
+await page.goto(WEB + '/settings');
 await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor();
 await page.waitForTimeout(500);
 
-await check('settings: loading the page leaves focus at its start, not in the token field', async () => {
+await check('settings: loading the page leaves focus at its start', async () => {
   const a = await focused();
   expect(a.tag === 'BODY', `focus on ${a.tag} ${a.text}`);
 });
@@ -71,14 +87,6 @@ await check('skip link: the first stop, and it moves focus to the page heading',
   a = await focused();
   expect(a.tag === 'H1' && a.text === 'Settings', `after skip: ${a.tag} ${a.text}`);
 }, { tabsToLinks: true });
-await check('settings: the token is entered by keyboard and focus lands on Change', async () => {
-  await tabTo((a) => a.tag === 'INPUT');
-  await page.keyboard.type(ADMIN);
-  await key('Enter');
-  await page.getByText('Admin token saved').waitFor();
-  const a = await focused();
-  expect(a.text === 'Change', 'focus after save: ' + a.text);
-});
 await check('settings: a Campus is added by keyboard', async () => {
   await tabTo((a) => a.text === 'Add campus');
   await key('Enter');
@@ -199,10 +207,10 @@ await check('settings: the Device and the Campus are deleted by keyboard through
     await key('Enter');
     await page.getByRole('cell', { name: target, exact: true }).waitFor({ state: 'detached', timeout: 5000 });
   }
-  await page.evaluate(() => localStorage.clear());
 });
 
 const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, ...address() });
+await signInContext(phone, WEB, typist);
 const small = await phone.newPage();
 await check('phone: the sidebar sheet opens by keyboard, keeps focus, and Escape closes it back to its trigger', async () => {
   await small.goto(WEB + '/');
@@ -228,6 +236,7 @@ await check('phone: the sidebar sheet opens by keyboard, keeps focus, and Escape
 });
 
 await browser.close();
+await typist.remove();
 const passed = results.filter(Boolean).length;
 console.log(`\n${name}: ${passed} of ${results.length} keyboard checks passed`);
 process.exit(passed === results.length ? 0 : 1);

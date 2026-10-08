@@ -25,6 +25,12 @@
 // (add :PORT only if WEB_PORT was changed).
 #define SERVER_URL "https://YOUR_DOMAIN"
 
+// A second server to fall back to, or "" for none. A board whose reports SERVER_URL does not take
+// twice in a row (no answer, the token refused, the Device not registered there, a server error)
+// moves to this one, and after an hour there tries SERVER_URL again. Both take the same Device token
+// and need the Device registered; the board updates over the air from whichever it is on.
+#define SERVER_URL_2 ""
+
 // Must match DEVICE_TOKEN in the backend .env (docs/adr/0003).
 #define DEVICE_TOKEN "change-me-device"
 

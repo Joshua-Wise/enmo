@@ -3,8 +3,8 @@
  * Demo mode: a living dashboard with no boards attached. The `demo` service of
  * compose.demo.yaml runs this; `deploy/deploy.sh demo` (or deploy.ps1 demo) starts it.
  *
- *  1. Seeds Campuses and Devices through the public API with the Admin token, exactly as an
- *     operator would in Settings. Anything already there is left alone, so a restart is safe.
+ *  1. Seeds Campuses and Devices through the API with the Admin token, as an Admin would in
+ *     Settings. Anything already there is left alone, so a restart is safe.
  *  2. Backfills seven days of history per Device. The API stamps every Reading with the server's
  *     own clock and has no backfill route (nor should it), so these rows go straight into the
  *     `readings` table (backend/src/migrations/0001-initial-schema.ts) over a MySQL connection.
@@ -312,7 +312,7 @@ async function waitForApi() {
 /** Campuses and Devices through the API with the Admin token. Fills in whatever is missing. */
 async function seed() {
   const admin = config.adminToken;
-  const campuses = (await api('GET', '/api/campuses')).body;
+  const campuses = (await api('GET', '/api/campuses', admin)).body;
   const ours = new Set(CAMPUSES.map((c) => c.shortcode));
   const foreign = campuses.filter((c) => !ours.has(c.shortcode));
   if (foreign.length > 0) {
@@ -329,7 +329,7 @@ async function seed() {
     campusIds.set(campus.shortcode, created.body.id);
     log(`Campus ${campus.shortcode} (${campus.name}) added`);
   }
-  const devices = new Map((await api('GET', '/api/devices')).body.map((d) => [d.hostname, d.id]));
+  const devices = new Map((await api('GET', '/api/devices', admin)).body.map((d) => [d.hostname, d.id]));
   let added = 0;
   for (const device of DISTRICT) {
     if (devices.has(device.hostname)) {
@@ -514,6 +514,7 @@ function startLive(startedAt) {
     }, offset);
   }
   log(`live: ${DISTRICT.length} Devices report every ${interval} s; the scenarios loop every ${Math.round(LOOP_SECONDS / 60)} minutes`);
+  log('sign in to the site as admin / admin and choose a new password (a fresh database starts with that user)');
 }
 
 async function main() {

@@ -45,7 +45,7 @@ $O = @{
     Reveal = $false; Reconfigure = $false; Wipe = $false; Confirm = ''; Follow = $false; Tail = '200'
     Service = ''; Hosts = @(); Servers = ''; Dir = 'temperature-alarms'; Repo = ''; Branch = ''
     SshOpts = $env:DEPLOY_SSH_OPTS; Pass = @(); Bootstrap = $false; At = '02:00'; Down = $false
-    Finish = $false; Force = $false; Only = ''
+    Finish = $false; Force = $false; Only = ''; User = ''
     SmtpHost = ''; SmtpPort = ''; SmtpSecure = ''; SmtpUser = ''; NotifyFrom = ''; NotifyTo = ''; PublicUrl = ''; NotifyRemindHours = ''
     NotifyMonthlyReport = ''; NotifyQuietHours = ''; NotifyQuietWeekends = ''
 }
@@ -95,6 +95,10 @@ With no action at a console, shows a menu. Actions:
   firmware-status    The published build, who it is offered to and where each of them is on the
                      way to it, and the version each Device runs
   withdraw-firmware  Stop offering the published build; boards keep what they run
+  reset-admin-password  A locked-out owner's way back in: type a new password (not shown) for the
+                     user admin (--user NAME for another), which becomes an enabled Admin with it,
+                     created if missing; its sessions end. With --yes the password is the first
+                     line piped in. Never on the command line.
   stop               Stop the containers; data and settings stay
   uninstall          Remove containers and built images; --wipe also deletes the database
                      (typed confirmation). .env and backups\ stay.
@@ -190,6 +194,7 @@ function Read-Args([string[]]$List) {
                 'force' { $O.Force = $true; $O.Pass += '--force' }
                 'only' { $takesValue = $true; $O.Only = $next; $O.Pass += @('--only', $next) }
                 'file' { $takesValue = $true; $O.File = $next; $O.Pass += @('--file', $next) }
+                'user' { $takesValue = $true; $O.User = $next; $O.Pass += @('--user', $next) }
                 { $_ -in 'f', 'follow' } { $O.Follow = $true; $O.Pass += '--follow' }
                 'service' { $takesValue = $true; $O.Service = $next; $O.Pass += @('--service', $next) }
                 'tail' { $takesValue = $true; $O.Tail = $next; $O.Pass += @('--tail', $next) }
@@ -950,7 +955,7 @@ function Invoke-Deploy {
     Step 'Health through web'
     if (-not (Test-Health 30)) { Fail 'the stack is up but /api/health through web failed; see: deploy.ps1 logs' }
     Write-Host ''
-    Write-Line "Deployed. Dashboard: $(Get-SiteUrl)  (Settings needs the Admin token: deploy.ps1 info --reveal)" 'Green'
+    Write-Line "Deployed. Dashboard: $(Get-SiteUrl)  (a fresh install signs in as admin / admin, then asks for a new password)" 'Green'
 }
 
 function Invoke-Status {
@@ -1075,7 +1080,7 @@ function Invoke-Info {
     $interval = Get-EnvValue 'REPORT_INTERVAL_SECONDS'
     Step "Temperature Alarms ($(Get-ProjectName))"
     Write-Host "  Dashboard     $url"
-    Write-Host "  Admin token   $(Hide-Secret (Get-EnvValue 'ADMIN_TOKEN'))   (Settings page)"
+    Write-Host "  Admin token   $(Hide-Secret (Get-EnvValue 'ADMIN_TOKEN'))   (scripts: bench.py, e2e; people sign in)"
     Write-Host "  Device token  $(Hide-Secret (Get-EnvValue 'DEVICE_TOKEN'))"
     $previous = Get-EnvValue 'DEVICE_TOKEN_PREVIOUS'
     if ($previous) { Write-Host "  Previous      $(Hide-Secret $previous)   (still accepted: rotate-device-token --finish ends that)" }
@@ -1208,6 +1213,34 @@ function Invoke-WithdrawFirmware {
     if ($LASTEXITCODE -ne 0) { Fail 'could not withdraw the firmware' }
 }
 
+# --- Users (docs/adr/0010) ---------------------------------------------------------------
+# The password goes into api as the first line of stdin, never as an argument any process on the
+# host can read; backend/src/userCli.ts checks it and sets it.
+function Invoke-ResetAdminPassword {
+    Step "Reset an Admin's password"
+    $user = if ($O.User) { $O.User } else { 'admin' }
+    if ($user -notmatch '\A[A-Za-z0-9._@-]+\z') { Fail '--user takes a username: letters, digits, and . _ @ -' }
+    Assert-ApiRunning
+    $pw = ''
+    if (Test-Interactive) {
+        $plain = { param($secure) if ($secure -and $secure.Length -gt 0) { (New-Object System.Management.Automation.PSCredential 'u', $secure).GetNetworkCredential().Password } else { '' } }
+        $pw = & $plain (Read-Host "  New password for $user (not shown; 8 characters or more)" -AsSecureString)
+        $again = & $plain (Read-Host '  The same again' -AsSecureString)
+        if ($pw -ne $again) { Fail 'the two did not match; nothing changed' }
+    }
+    else {
+        $line = $null
+        if ($script:ScriptExpectingInput -and $script:ScriptInput -and $script:ScriptInput.MoveNext()) { $line = "$($script:ScriptInput.Current)" }
+        elseif (Test-StdinRedirected) { $line = [Console]::In.ReadLine() }
+        else { Fail "with --yes the password is read from a pipe, and nothing is piped in. Pipe it (`$pw = Read-Host -AsSecureString; [Net.NetworkCredential]::new('', `$pw).Password | .\deploy\deploy.ps1 reset-admin-password --yes), or leave out --yes to type it at a hidden prompt" }
+        # Windows PowerShell pipes lines with CRLF.
+        if ($null -ne $line) { $pw = $line.TrimEnd("`r") }
+    }
+    if ($pw.Length -lt 8) { Fail 'a password needs at least 8 characters; nothing changed' }
+    $pw | Invoke-DcStdin exec -T api node dist/userCli.js reset-admin-password $user
+    if ($LASTEXITCODE -ne 0) { Fail 'not reset; see the line above' }
+}
+
 function Invoke-Stop {
     Step 'Stop'
     Invoke-Dc stop
@@ -1290,7 +1323,8 @@ function Invoke-Demo {
     Write-Line "Demo running. Dashboard: $(Get-SiteUrl)" 'Green'
     Write-Host '  The first minute seeds 4 Campuses and 24 Devices and writes a week of history; then'
     Write-Host '  the closets loop through Hot, Dry, Mold risk, Cold, late, and Offline every 10 minutes.'
-    Write-Host "  Admin token for Settings (throwaway): $(Get-EnvValue 'ADMIN_TOKEN')"
+    Write-Host '  Sign in as admin / admin, then choose a new password (this demo''s own database).'
+    Write-Host "  Admin token for scripts (throwaway): $(Get-EnvValue 'ADMIN_TOKEN')"
     Write-Host "  Watch it:  docker compose -p $DemoProject logs -f demo"
     Write-Host '  Remove it: deploy\deploy.ps1 demo --down'
 }
@@ -1321,6 +1355,7 @@ function Invoke-Action([string]$Name) {
         'publish-firmware' { Invoke-PublishFirmware }
         'firmware-status' { Invoke-FirmwareStatus }
         'withdraw-firmware' { Invoke-WithdrawFirmware }
+        'reset-admin-password' { Invoke-ResetAdminPassword }
         'stop' { Invoke-Stop }
         'uninstall' { Invoke-Uninstall }
         'demo' { Invoke-Demo }
@@ -1333,7 +1368,8 @@ function Invoke-Action([string]$Name) {
 function Show-Menu {
     $map = @{ '1' = 'preflight'; '2' = 'install'; '3' = 'deploy'; '4' = 'status'; '5' = 'logs'; '6' = 'backup'
         '7' = 'restore'; '8' = 'info'; '9' = 'stop'; '10' = 'uninstall'; '11' = 'demo'
-        '12' = 'rotate-device-token'; '13' = 'rotate-device-token'; '14' = 'firmware-status'; '15' = 'publish-firmware' }
+        '12' = 'rotate-device-token'; '13' = 'rotate-device-token'; '14' = 'firmware-status'; '15' = 'publish-firmware'
+        '16' = 'reset-admin-password' }
     while ($true) {
         Write-Host ''
         Write-Line "Temperature Alarms deploy  $RepoDir  (project $(Get-ProjectName), port $(Get-WebPortSetting))" 'Cyan'
@@ -1345,16 +1381,17 @@ function Show-Menu {
         Write-Host '   6) Back up the database'
         Write-Host '  12) Rotate the Device token  13) Finish the Device token rotation'
         Write-Host '  14) Firmware status          15) Publish firmware (asks for the file)'
-        Write-Host '                                q) Quit'
+        Write-Host "  16) Reset an Admin's password  q) Quit"
         $choice = Read-Host '  Choose'
         if ($null -eq $choice -or $choice -in @('q', 'quit', 'exit')) { return }
         if (-not $map.ContainsKey($choice.Trim())) { Warn 'no such choice'; continue }
         $action = $map[$choice.Trim()]
         $O.Finish = ($choice.Trim() -eq '13')
         if ($choice.Trim() -eq '15') { $O.File = Ask 'The .bin.signed to publish' '' }
+        if ($choice.Trim() -eq '16') { $O.User = Ask 'Which user' 'admin' }
         try { Set-LegacyRootEnv; Invoke-Action $action }
         catch { Write-Line "Error: $($_.Exception.Message)" 'Red'; Warn "$action did not finish" }
-        $O.File = ''; $O.Reveal = $false; $O.Wipe = $false; $O.Down = $false; $O.Finish = $false; $O.Only = ''
+        $O.File = ''; $O.Reveal = $false; $O.Wipe = $false; $O.Down = $false; $O.Finish = $false; $O.Only = ''; $O.User = ''
         # The demo points these at its own project and .env.demo; the next action gets the real ones.
         $script:EnvPath = Join-Path $RepoDir '.env'; $script:DcArgs = @()
     }

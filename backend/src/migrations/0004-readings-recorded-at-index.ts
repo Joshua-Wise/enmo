@@ -3,7 +3,7 @@ import { indexExists } from './introspect';
 
 /**
  * The retention job deletes by `recorded_at` alone. Without this index each batch would walk
- * the clustered index, and after the legacy migration old rows are scattered through it, one
+ * the clustered index, and old rows are scattered through it, one
  * block per Device (docs/adr/0002), so the walk would cover most of the table.
  * Guarded, so a run that built the index and died before being recorded can repeat.
  */

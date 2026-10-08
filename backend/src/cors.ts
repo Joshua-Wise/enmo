@@ -14,6 +14,9 @@ export function corsMiddleware(config: Config): RequestHandler {
     if (!origin || origin === config.corsOrigin || isOwnOrigin(origin, req.headers.host)) {
       callback(null, {
         origin: true,
+        // The session cookie goes with a request from the allowed origin (the Vite dev server on
+        // its own port); only from there, since every other origin is refused above.
+        credentials: true,
         methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization'],
       });

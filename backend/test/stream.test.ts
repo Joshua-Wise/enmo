@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Pool } from 'mysql2/promise';
 import { createTestPool, resetDatabase } from './helpers/database';
 import { startServer, testConfig, type RunningServer } from './helpers/server';
-import { api, json, type RecordedReading } from './helpers/api';
+import { api, asAdmin, json, type RecordedReading } from './helpers/api';
 import { subscribe, type SseClient } from './helpers/sse';
 import { createBroadcaster, type FaultEvent, type ReadingEvent } from '../src/sse';
 
@@ -46,7 +46,7 @@ describe('GET /api/dashboard/stream', () => {
     return json<RecordedReading>(response);
   };
 
-  test('is an event stream that stays open, with no token and no wildcard CORS header', async () => {
+  test('is an event stream that stays open, with no wildcard CORS header', async () => {
     const stream = await listen();
     assert.equal(stream.response.status, 200);
     assert.match(stream.response.headers.get('content-type') ?? '', /^text\/event-stream/);
@@ -189,7 +189,7 @@ describe('GET /api/dashboard/stream', () => {
     }
     assert.equal(sse.clientCount, 0);
 
-    const refused = await fetch(streamUrl());
+    const refused = await fetch(streamUrl(), asAdmin());
     assert.equal(refused.status, 503);
     assert.deepEqual(await refused.json(), { error: 'The server is stopping; try again shortly.' });
     // A Reading in flight at the stop still reaches the broadcaster, which has no one left to write to.

@@ -21,6 +21,7 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { UserMenu } from "@/components/UserMenu"
 
 
 
@@ -98,6 +99,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </nav>
       </SidebarContent>
       <SidebarFooter>
+        <UserMenu />
         {/* Plain text, not a button: there is nothing here to press. A footer, so it sits in a landmark. */}
         <footer className="truncate px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
           {new Date().getFullYear()} ©

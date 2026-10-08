@@ -30,3 +30,7 @@ The site is public on the internet and had no authentication at all: anyone coul
 A lost board's token stays valid until `--finish`, so the window should be as short as the reflash allows. Per-Device tokens (a lost board exposes only itself) stay unbuilt: they need a per-board binary, schema, and Settings work, which one admin and an isolated device VLAN do not justify.
 
 **Transport.** Production boards post HTTPS to `https://YOUR_DOMAIN`, checking its certificate against Let's Encrypt's roots (ADR 0001, update 2026-10-06), so the device token is no longer readable on the network. It is still readable from any board's flash, and the rotation window is the remedy for a leak.
+
+## Update 2026-10-08: viewing is no longer open
+
+Superseded in part by [ADR 0010](0010-sign-in-and-users.md): the owner put the whole site behind a username and password, so "viewing the dashboard and history stays unauthenticated by design" no longer holds, and the Admin token is no longer entered in Settings. The Admin token remains the machine credential for scripts and still authorises every change as a Bearer; the Device token and everything above about it are unchanged.

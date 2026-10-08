@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { requireAdminToken } from '../auth';
-import type { AppDeps } from '../deps';
+import type { RouteDeps } from '../deps';
 import { parseCampus, parseRecipients } from '../campusInput';
 import { isDuplicateKey, isForeignKeyInUse } from '../db';
 
@@ -20,13 +19,13 @@ interface RecipientsRow extends RowDataPacket {
 const addressesOf = (stored: string): string[] => stored.split(',').map((a) => a.trim()).filter((a) => a !== '');
 
 /**
- * Campus routes: anyone may list; adding, changing, deleting, and reading the recipient lists need
- * the Admin token. A Campus's own recipients (docs/adr/0008) are read apart from it, so the public
+ * Campus routes: any signed-in user may list; adding, changing, deleting, and reading the recipient lists need
+ * an Admin (auth.ts). A Campus's own recipients (docs/adr/0008) are read apart from it, so the
  * list never carries an address.
  */
-export function campusesRouter({ pool, config }: AppDeps): Router {
+export function campusesRouter({ pool, auth }: RouteDeps): Router {
   const router = Router();
-  const adminOnly = requireAdminToken(config);
+  const adminOnly = auth.admin;
 
   router.get('/', async (_req, res, next) => {
     try {

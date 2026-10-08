@@ -20,5 +20,6 @@ void updaterLoop();
 // refused build cannot loop).
 void updaterOffered(long version);
 
-// How the last check went, for the next Reading: "none newer", "failed, ...", or "" before the first.
+// How the last check went, for the next Reading: "none newer", "failed, ...", "skipped, ..." (no
+// checked TLS yet, nothing sent), or "" before the first.
 const String& updaterLastResult();

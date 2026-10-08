@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { BrowserRouter as Router, Navigate, Routes, Route, useLocation } from 'react-router-dom';
 import { motion, MotionConfig } from 'framer-motion';
 import { isMorphing } from '@/lib/card-morph';
 import { EASE_OUT_QUINT } from '@/lib/motion';
@@ -11,6 +11,14 @@ import NotFound from './pages/NotFound';
 import { historyModule } from './pages/history-loader';
 import { Skeleton } from '@/components/ui/skeleton';
 import { NewDevicePrompt } from '@/components/NewDevicePrompt';
+import { Placeholder } from '@/components/Placeholder';
+import { Button } from '@/components/ui/button';
+import { describeError, getSession, UnauthorisedError } from '@/api';
+import { useSession } from '@/hooks/use-session';
+import { setSession } from '@/lib/session';
+import { returnPath, signInPath, SIGN_IN_PATH } from '@/lib/signIn';
+import SignIn from './pages/SignIn';
+import ChoosePassword from './pages/ChoosePassword';
 
 // History carries the charting library, which is a third of the bundle and unused elsewhere, so it loads on first visit
 // (or while the dashboard idles; see history-loader).
@@ -102,10 +110,10 @@ function focusPageStart() {
   target.focus({ preventScroll: true });
 }
 
-function App() {
+/** The pages, behind the sidebar: for someone signed in with a password of their own. */
+function Shell() {
   return (
-    <MotionConfig reducedMotion="user">
-      <Router>
+    <>
       {/* The first stop on every page, shown when focused: past the sidebar's links to the page itself. */}
       <a
         href={`#${MAIN_ID}`}
@@ -133,10 +141,58 @@ function App() {
           <NewDevicePrompt />
         </SidebarInset>
       </SidebarProvider>
-    </Router>
+    </>
+  );
+}
+
+/**
+ * Every page needs someone signed in (docs/adr/0010). Until the server says who, a quiet blank;
+ * no one, the sign-in page, which returns to the page asked for; `admin` still on its first
+ * password, nothing but choosing a new one; anyone else, the pages.
+ */
+function SessionGate() {
+  const session = useSession();
+  const location = useLocation();
+  const [unreachable, setUnreachable] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setUnreachable(null);
+    getSession().then(setSession, (error: unknown) => {
+      // A 401 has already ended the session (api.ts); anything else is a server that did not answer.
+      if (!(error instanceof UnauthorisedError)) setUnreachable(describeError(error));
+    });
+  }, []);
+  useEffect(load, [load]);
+
+  if (session.status === 'loading') {
+    if (unreachable === null) return <div className="min-h-svh bg-background" aria-busy aria-label="Loading" />;
+    return (
+      <main id={MAIN_ID} className="flex min-h-svh items-center justify-center bg-background p-4">
+        <Placeholder role="alert" className="w-full max-w-md">
+          <h1 className="font-medium">The server did not answer</h1>
+          <p className="max-w-sm text-sm text-muted-foreground">{unreachable}. Nothing can be shown until it does.</p>
+          <Button variant="outline" size="sm" onClick={load}>
+            Try again
+          </Button>
+        </Placeholder>
+      </main>
+    );
+  }
+  const onSignIn = location.pathname === SIGN_IN_PATH;
+  if (session.status === 'signed-out') return onSignIn ? <SignIn /> : <Navigate to={signInPath(location)} replace />;
+  if (session.mustChangePassword) return <ChoosePassword />;
+  if (onSignIn) return <Navigate to={returnPath(location.search)} replace />;
+  return <Shell />;
+}
+
+function App() {
+  return (
+    <MotionConfig reducedMotion="user">
+      <Router>
+        <SessionGate />
+      </Router>
     </MotionConfig>
   );
 }
 
 export default App;
-

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Pool } from 'mysql2/promise';
 import { createTestPool, resetDatabase } from './helpers/database';
 import { startServer, testConfig, type RunningServer } from './helpers/server';
-import { api, errorOf, type Device } from './helpers/api';
+import { api, asAdmin, errorOf, type Device } from './helpers/api';
 import { csvCell, csvRow, fileNamePart } from '../src/csv';
 import { CSV_PAGE_ROWS } from '../src/routes/csvExports';
 import { incidentsOverlappingPage, insertIncident } from '../src/incidentStore';
@@ -98,9 +98,9 @@ describe('CSV downloads', () => {
   const readingAt = async (deviceId: number, recordedAt: string, tempF = 72, humidity: number | null = 40) => {
     await pool.query('INSERT INTO readings (device_id, temp_f, humidity, recorded_at) VALUES (?, ?, ?, ?)', [deviceId, tempF, humidity, new Date(recordedAt)]);
   };
-  // Requests carry no token: the downloads are as public as History and the Incidents log.
-  const readingsCsv = (id: number | string, query: string) => fetch(`${server.url}/api/devices/${id}/readings.csv${query}`);
-  const incidentsCsv = (query: string) => fetch(`${server.url}/api/incidents.csv${query}`);
+  // The downloads need what History and the Incidents log need: a session or the Admin token (docs/adr/0010).
+  const readingsCsv = (id: number | string, query: string) => fetch(`${server.url}/api/devices/${id}/readings.csv${query}`, asAdmin());
+  const incidentsCsv = (query: string) => fetch(`${server.url}/api/incidents.csv${query}`, asAdmin());
 
   describe('GET /api/devices/:id/readings.csv', () => {
     test('one row per Reading of the day, oldest first: local time, UTC time, °F, °C, and humidity, unformatted, under a header row', async () => {

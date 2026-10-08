@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { createTestPool, resetDatabase } from './helpers/database';
 import { startServer, testConfig, type RunningServer } from './helpers/server';
-import { api, errorOf, type Device, type History } from './helpers/api';
+import { api, asAdmin, errorOf, type Device, type History } from './helpers/api';
 import { HISTORY_ROW_LIMIT } from '../src/routes/readings';
 
 /** Chicago is six hours behind UTC in September (CDT), so its 5 September starts at 05:00Z. */
@@ -55,7 +55,7 @@ describe('/api/devices/:id/history', () => {
   };
 
   describe('GET', () => {
-    test('an empty day is a 200 with the device, the bounds, no readings, and no summary, without a token', async () => {
+    test('an empty day is a 200 with the device, the bounds, no readings, and no summary', async () => {
       const device = await registerDevice('ESP_A1B2C3', 'MDF');
       const history = await historyOf(device.id);
       assert.deepEqual(history, {
@@ -198,7 +198,7 @@ describe('/api/devices/:id/history', () => {
 
     test('is 404 for a device that does not exist', async () => {
       for (const id of ['999', '0', 'ESP_A1B2C3']) {
-        const response = await fetch(`${server.url}/api/devices/${id}/history?date=${DAY}&tz=${CHICAGO}`);
+        const response = await fetch(`${server.url}/api/devices/${id}/history?date=${DAY}&tz=${CHICAGO}`, asAdmin());
         assert.equal(response.status, 404, id);
         assert.equal(await errorOf(response), 'Device not found');
       }

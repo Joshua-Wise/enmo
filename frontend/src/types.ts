@@ -17,7 +17,7 @@ export interface Device {
 }
 
 /**
- * A Device token rotation (GET /api/devices/rotation, Admin token): while the previous token is
+ * A Device token rotation (GET /api/devices/rotation, an Admin only): while the previous token is
  * still accepted, the Devices whose latest Reading used it, and those not heard since `since`.
  */
 export interface DeviceRotation {
@@ -114,7 +114,7 @@ export interface StagedDevice {
   ready: boolean;
 }
 
-/** GET /api/firmware/status (Admin token): the release, the version each Device last reported, and a staged release's named Devices. */
+/** GET /api/firmware/status (an Admin only): the release, the version each Device last reported, and a staged release's named Devices. */
 export interface FirmwareStatus {
   release: FirmwareRelease | null;
   /** Each Device the release is offered to, stuck ones first; null when nothing is published. */
@@ -324,7 +324,7 @@ export interface IncidentEvent {
 
 /**
  * What the live stream sends when firmware status can have changed: the signal alone, since the
- * status is behind the Admin token and the stream is not. An open Firmware tab reads it again.
+ * status is an Admin's and the stream is every signed-in user's. An open Firmware tab reads it again.
  */
 export interface FirmwareEvent {
   type: 'firmware';
@@ -395,7 +395,7 @@ export interface Overview {
   campuses: CampusOverview[];
 }
 
-/** GET /api/notifications/status (Admin token): whether Incidents are emailed, through which relay, to whom, and how the last send went. */
+/** GET /api/notifications/status (an Admin only): whether Incidents are emailed, through which relay, to whom, and how the last send went. */
 export interface NotificationStatus {
   enabled: boolean;
   /** Null when notifications are off. */
@@ -438,7 +438,7 @@ export interface RecipientList {
   lastResult: ({ at: string } & ({ sent: true; subject: string } | { sent: false; error: string })) | null;
 }
 
-/** GET /api/campuses/recipients (Admin token): a Campus's own recipients, empty when it emails NOTIFY_TO. */
+/** GET /api/campuses/recipients (an Admin only): a Campus's own recipients, empty when it emails NOTIFY_TO. */
 export interface CampusRecipients {
   id: number;
   notifyTo: string[];
@@ -470,7 +470,7 @@ interface SystemDevice {
   campus: Campus;
 }
 
-/** GET /api/system (Admin token): whether the system itself is OK, line by line, with the thresholds it was judged against. */
+/** GET /api/system (an Admin only): whether the system itself is OK, line by line, with the thresholds it was judged against. */
 export interface SystemHealth {
   /** The server's clock when it looked: ages on the page are counted from it. */
   checkedAt: string;
@@ -493,4 +493,29 @@ export interface SystemHealth {
   wifi: { status: CheckStatus; belowDbm: number; forHours: number; weak: Array<SystemDevice & { rssi: number; since: string }> };
   /** `version` is the commit the server was built from, null when it was built by hand. */
   server: { status: CheckStatus; version: string | null; startedAt: string; uptimeSeconds: number };
+}
+
+/** Admin: may change things. Viewer: may only look (docs/adr/0010). */
+export type UserRole = 'admin' | 'viewer';
+
+/** Who is signed in, as GET /api/session says. */
+export interface SessionUser {
+  id: number;
+  username: string;
+  role: UserRole;
+}
+
+/** GET /api/session: who is signed in, and whether they must choose a new password before anything else. */
+export interface SessionInfo {
+  user: SessionUser;
+  /** Still on `admin`'s first password: nothing but choosing a new one is allowed. */
+  mustChangePassword: boolean;
+}
+
+/** A user as GET /api/users lists them (an Admin only). */
+export interface User extends SessionUser {
+  disabled: boolean;
+  /** ISO instants in UTC; null until the user first signs in. */
+  createdAt: string;
+  lastSignInAt: string | null;
 }

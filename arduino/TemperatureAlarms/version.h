@@ -3,4 +3,4 @@
 // is higher than its own, so a build with the same number is never installed twice.
 #pragma once
 
-#define FIRMWARE_VERSION 8
+#define FIRMWARE_VERSION 10

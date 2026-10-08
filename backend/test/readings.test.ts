@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { createTestPool, resetDatabase } from './helpers/database';
 import { startServer, TEST_ADMIN_TOKEN, type RunningServer } from './helpers/server';
-import { api, asDevice, errorOf, json, type Device, type RecordedReading } from './helpers/api';
+import { api, asAdmin, asDevice, errorOf, json, type Device, type RecordedReading } from './helpers/api';
 
 interface StoredReading {
   deviceId: number;
@@ -204,7 +204,7 @@ describe('POST /api/readings', () => {
     assert.equal(wrongToken.status, 401);
 
     // The rest of the API from the same IP is unaffected.
-    assert.equal((await fetch(client.devices.url())).status, 200);
+    assert.equal((await fetch(client.devices.url(), asAdmin())).status, 200);
     assert.equal((await client.campuses.add({ name: 'West Elementary', shortcode: 'WES' })).status, 201);
   });
 });

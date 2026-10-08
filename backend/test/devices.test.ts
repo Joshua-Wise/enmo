@@ -26,8 +26,8 @@ describe('/api/devices', () => {
   const addCampus = (name?: string, shortcode?: string) => client.campuses.create(name, shortcode);
   const addDevice = (body: unknown, init?: RequestInit) => client.devices.add(body, init);
 
-  test('lists nothing on a fresh database, without a token', async () => {
-    const response = await fetch(url());
+  test('lists nothing on a fresh database', async () => {
+    const response = await fetch(url(), asAdmin());
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), []);
   });
@@ -59,7 +59,7 @@ describe('/api/devices', () => {
     const body = { hostname: 'ESP_A1B2C3', campusId: campus.id, closet: 'IDF 2' };
     const missing = await addDevice(body, { headers: { 'Content-Type': 'application/json' } });
     assert.equal(missing.status, 401);
-    assert.deepEqual(await missing.json(), { error: 'Not authorised' });
+    assert.deepEqual(await missing.json(), { error: 'Sign in first' });
     const wrong = await addDevice(body, { headers: { 'Content-Type': 'application/json', Authorization: 'Bearer nope' } });
     assert.equal(wrong.status, 401);
     assert.deepEqual(await listed(), []);
@@ -252,7 +252,7 @@ describe('/api/devices', () => {
       const device = await createDevice();
       const missing = await edit(device.id, { closet: 'IDF 3' }, { headers: { 'Content-Type': 'application/json' } });
       assert.equal(missing.status, 401);
-      assert.deepEqual(await missing.json(), { error: 'Not authorised' });
+      assert.deepEqual(await missing.json(), { error: 'Sign in first' });
       const wrong = await edit(device.id, { closet: 'IDF 3' }, { headers: { 'Content-Type': 'application/json', Authorization: 'Bearer nope' } });
       assert.equal(wrong.status, 401);
       assert.deepEqual(await listed(), [device]);

@@ -16,7 +16,7 @@ import type { PendingDevice } from '@/types';
 import { DeleteButton, EmptyRow, ErrorRow, InlineError, InlineForm, SectionHeader, SkeletonRows, StatusLine } from './section';
 
 interface NewDevicesSectionProps {
-  /** False while no Admin token is stored: the list itself needs it. */
+  /** True for an Admin: the list itself is an Admin's to read. */
   canEdit: boolean;
   onUnauthorised: () => void;
 }
@@ -40,7 +40,7 @@ export function NewDevicesSection({ canEdit, onUnauthorised }: NewDevicesSection
       {canEdit ? (
         <PendingList onUnauthorised={onUnauthorised} />
       ) : (
-        <p className="text-sm text-muted-foreground">Enter the Admin token above to see boards waiting to be added.</p>
+        <p className="text-sm text-muted-foreground">Only an Admin sees boards waiting to be added.</p>
       )}
     </section>
   );

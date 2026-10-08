@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Pool } from 'mysql2/promise';
 import { createTestPool, resetDatabase } from './helpers/database';
 import { startServer, testConfig, type RunningServer } from './helpers/server';
-import { api, errorOf, json, type Dashboard, type RecordedReading } from './helpers/api';
+import { api, asAdmin, errorOf, json, type Dashboard, type RecordedReading } from './helpers/api';
 import { DEFAULT_THRESHOLDS } from '../src/conditions';
 
 describe('GET /api/dashboard', () => {
@@ -27,8 +27,8 @@ describe('GET /api/dashboard', () => {
   const postReading = async (device: string, temp: number, humidity: number): Promise<RecordedReading> =>
     json<RecordedReading>(await client.readings.add({ device, temp, humidity }));
 
-  test('reports the Report interval and no devices on a fresh database, without a token', async () => {
-    const response = await fetch(client.dashboard.url());
+  test('reports the Report interval and no devices on a fresh database', async () => {
+    const response = await fetch(client.dashboard.url(), asAdmin());
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { reportIntervalSeconds: 30, offlineAfterSeconds: 90, devices: [] } satisfies Dashboard);
   });
@@ -193,7 +193,7 @@ describe('GET /api/dashboard', () => {
       await postReading('ESP_000006', 95, 40);
     };
     const hostnamesFor = async (query: string) => {
-      const response = await fetch(client.dashboard.url(query));
+      const response = await fetch(client.dashboard.url(query), asAdmin());
       assert.equal(response.status, 200, query);
       return (await json<Dashboard>(response)).devices.map((d) => d.hostname);
     };
@@ -230,7 +230,7 @@ describe('GET /api/dashboard', () => {
     });
 
     test('refuses an unknown order with 422 and says which are allowed', async () => {
-      const response = await fetch(client.dashboard.url('?order=newest'));
+      const response = await fetch(client.dashboard.url('?order=newest'), asAdmin());
       assert.equal(response.status, 422);
       assert.match(await errorOf(response), /worst, campus/);
     });
@@ -354,7 +354,7 @@ describe('GET /api/dashboard', () => {
     await addDevice(campus.id, 'ESP_A1B2C3', 'IDF 2');
     const gone = ['/api/temperature/ESP_A1B2C3', '/api/temperature/ESP_A1B2C3/history', '/api/history', '/api/history?device=ESP_A1B2C3'];
     for (const path of gone) {
-      const response = await fetch(`${server.url}${path}`);
+      const response = await fetch(`${server.url}${path}`, asAdmin());
       assert.equal(response.status, 404, path);
       assert.deepEqual(await response.json(), { error: 'Not found' });
     }

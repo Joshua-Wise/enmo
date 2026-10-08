@@ -6,12 +6,15 @@
  * Every message is unnamed, its `data` a JSON object whose `type` says what it is: a `reading`,
  * a `fault` report, an `incident`, or `firmware`, a signal that firmware status can have changed.
  * A stopping server ends every stream, telling the browser to come back in 2 s (shutdown.ts).
+ * Opening one needs a session or the Admin token (auth.ts); a stream opened by a session closes
+ * when that session ends (sessions.ts), and the browser's reconnect is then refused.
  *
  * The response carries only the headers SSE needs. CORS is the shared middleware's job.
  */
 import type { Request, RequestHandler, Response } from 'express';
 import type { Condition, ConditionLevel, ConditionName } from './conditions';
 import type { IncidentChange } from './incidents';
+import type { Session } from './sessions';
 
 /** A Reading as the API sends it: the dashboard payload, the 201 on ingest, and the stream all use this shape. */
 export interface ReadingPayload {
@@ -101,8 +104,8 @@ export interface IncidentEvent {
 
 /**
  * What every open dashboard receives when firmware status can have changed (docs/adr/0007): the
- * signal and nothing more. The status names WiFi networks and is the Admin's, while the stream is
- * anyone's, so an open Firmware tab reads GET /api/firmware/status again with the Admin token.
+ * signal and nothing more. The status names WiFi networks and is an Admin's, while the stream is
+ * every signed-in user's, so an open Firmware tab reads GET /api/firmware/status again.
  */
 export interface FirmwareEvent {
   type: 'firmware';
@@ -110,6 +113,12 @@ export interface FirmwareEvent {
 
 /** Every message the stream carries, told apart by `type`. */
 export type StreamEvent = ReadingEvent | FaultEvent | IncidentEvent | FirmwareEvent;
+
+/** Whose a stream is: the session that opened it (auth.ts leaves it in res.locals.session). None for the Admin token. */
+export interface StreamOwner {
+  sessionId: string;
+  userId: number;
+}
 
 export interface Broadcaster {
   /** Express handler for GET /api/dashboard/stream. */
@@ -126,6 +135,10 @@ export interface Broadcaster {
   readonly firmwareEveryMs: number;
   /** How many dashboards are connected right now. */
   readonly clientCount: number;
+  /** Close the streams opened by the sessions `which` picks, at once. Returns how many. */
+  endStreams(which: (owner: StreamOwner) => boolean): number;
+  /** Every session holding a stream open, once each. */
+  streamSessions(): string[];
   readonly heartbeatMs: number;
   /** End every stream with a 2 s retry and refuse new ones, as the server stops (shutdown.ts). */
   close(): void;
@@ -163,7 +176,8 @@ export function createBroadcaster({
   maxStreams = DEFAULT_MAX_STREAMS,
   firmwareEveryMs = DEFAULT_FIRMWARE_EVERY_MS,
 }: BroadcasterOptions = {}): Broadcaster {
-  const clients = new Set<Response>();
+  /** Each open stream, the address it counts against, and the session that opened it. */
+  const clients = new Map<Response, { address: string; owner: StreamOwner | undefined }>();
   /** Open streams per address, as app.ts's trust proxy setting resolves it. */
   const perAddress = new Map<string, number>();
   let heartbeat: NodeJS.Timeout | undefined;
@@ -175,7 +189,7 @@ export function createBroadcaster({
   const startHeartbeat = () => {
     if (heartbeat !== undefined) return;
     heartbeat = setInterval(() => {
-      for (const res of clients) res.write(': heartbeat\n\n');
+      for (const res of clients.keys()) res.write(': heartbeat\n\n');
     }, heartbeatMs);
     heartbeat.unref();
   };
@@ -183,6 +197,17 @@ export function createBroadcaster({
     if (clients.size > 0 || heartbeat === undefined) return;
     clearInterval(heartbeat);
     heartbeat = undefined;
+  };
+
+  // Once per stream, whether it closed from the browser's end or this one's.
+  const drop = (res: Response) => {
+    const client = clients.get(res);
+    if (client === undefined) return;
+    clients.delete(res);
+    const left = (perAddress.get(client.address) ?? 1) - 1;
+    if (left > 0) perAddress.set(client.address, left);
+    else perAddress.delete(client.address);
+    stopHeartbeatIfIdle();
   };
 
   const handler = (req: Request, res: Response) => {
@@ -213,20 +238,15 @@ export function createBroadcaster({
     // A first comment so the browser's `open` event fires at once, before any Reading.
     res.write(': connected\n\n');
 
-    clients.add(res);
+    const session = res.locals.session as Session | undefined;
+    clients.set(res, { address, owner: session === undefined ? undefined : { sessionId: session.id, userId: session.user.id } });
     startHeartbeat();
-    req.on('close', () => {
-      clients.delete(res);
-      const left = (perAddress.get(address) ?? 1) - 1;
-      if (left > 0) perAddress.set(address, left);
-      else perAddress.delete(address);
-      stopHeartbeatIfIdle();
-    });
+    req.on('close', () => drop(res));
   };
 
   const broadcast = (event: StreamEvent) => {
     const frame = `data: ${JSON.stringify(event)}\n\n`;
-    for (const res of clients) res.write(frame);
+    for (const res of clients.keys()) res.write(frame);
   };
 
   return {
@@ -235,6 +255,19 @@ export function createBroadcaster({
     firmwareEveryMs,
     get clientCount() {
       return clients.size;
+    },
+    endStreams(which) {
+      let ended = 0;
+      for (const [res, { owner }] of clients) {
+        if (owner === undefined || !which(owner)) continue;
+        res.end();
+        drop(res);
+        ended += 1;
+      }
+      return ended;
+    },
+    streamSessions() {
+      return [...new Set([...clients.values()].flatMap(({ owner }) => (owner === undefined ? [] : [owner.sessionId])))];
     },
     broadcast,
     firmwareChanged() {
@@ -248,7 +281,7 @@ export function createBroadcaster({
     },
     close() {
       closed = true;
-      for (const res of clients) res.end(`retry: ${RECONNECT_AFTER_STOP_MS}\n\n`);
+      for (const res of clients.keys()) res.end(`retry: ${RECONNECT_AFTER_STOP_MS}\n\n`);
       // At once, not as each socket closes: a Reading or a sweep pass still in flight broadcasts after this.
       clients.clear();
       if (heartbeat !== undefined) clearInterval(heartbeat);

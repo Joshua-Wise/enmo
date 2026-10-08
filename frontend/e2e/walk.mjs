@@ -1,6 +1,9 @@
 // End-to-end walk of the site and backend on a fresh (empty) database. One line per check.
 // WEB and API default to the Compose stack on one port; ADMIN_TOKEN and DEVICE_TOKEN come from the environment.
+// The site needs a signed-in user (docs/adr/0010): the walk adds a throwaway Admin with the Admin token, signs
+// in as it, and deletes it at the end, so admin's own password is never touched.
 import { chromium } from 'playwright';
+import { signInContext, throwawayUser } from './session.mjs';
 
 const WEB = process.env.WEB ?? 'http://localhost:8080';
 const API = process.env.API ?? WEB;
@@ -18,6 +21,7 @@ const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
 const post = (path, token, body) => fetch(API + path, { method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(body) });
 const reading = (token, temp, humidity = 41, device = 'ESP_C0FFEE') => post('/api/readings', token, { device, temp, humidity });
 
+const walker = await throwawayUser(API, ADMIN, 'admin');
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 const page = await context.newPage();
@@ -27,29 +31,32 @@ page.on('pageerror', (e) => consoleErrors.push('pageerror: ' + e.message));
 const failedRequests = [];
 page.on('response', (r) => { if (r.status() >= 500) failedRequests.push(r.status() + ' ' + r.url()); });
 
+await check('api: no session reads nothing', async () => expect((await fetch(API + '/api/dashboard')).status === 401, 'status'));
+await check('sign-in: a page asked for without a session shows the sign-in page', async () => {
+  await page.goto(WEB + '/settings');
+  await page.getByRole('heading', { name: 'Sign in', level: 1 }).waitFor();
+  expect(/\/sign-in\?next=%2Fsettings$/.test(page.url()), 'url: ' + page.url());
+  expect((await page.title()) === 'Sign in · Temperature Alarms', 'title: ' + (await page.title()));
+});
+await check('sign-in: a wrong password says only Wrong username or password', async () => {
+  await page.getByLabel('Username').fill(walker.username);
+  await page.getByLabel('Password').fill('not-the-password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('alert').getByText('Wrong username or password').waitFor({ timeout: 5000 });
+});
+await check('sign-in: the right password returns to the page asked for', async () => {
+  await page.getByLabel('Password').fill(walker.password);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor({ timeout: 5000 });
+  expect(new URL(page.url()).pathname === '/settings', 'url: ' + page.url());
+});
 await check('fresh database: dashboard shows the empty state', async () => {
   await page.goto(WEB + '/');
   await page.getByRole('heading', { name: 'Dashboard' }).waitFor();
   await page.waitForTimeout(800);
   expect(!/ESP_/.test(await page.locator('main').innerText()), 'expected no Device on the dashboard');
-});
-await check('settings: the Admin token is asked for once', async () => {
   await page.goto(WEB + '/settings');
-  await page.getByText('Admin token needed').waitFor();
-});
-await check('settings: a wrong token is refused and the panel says Not authorised', async () => {
-  await page.locator('#admin-token').fill('wrong-token');
-  await page.getByRole('button', { name: 'Save token' }).click();
-  await page.getByRole('button', { name: 'Add campus' }).click();
-  await page.getByLabel('Name').fill('Central High School');
-  await page.getByLabel('Shortcode').fill('chs');
-  await page.getByRole('button', { name: 'Save campus' }).click();
-  await page.getByText('Not authorised').waitFor({ timeout: 5000 });
-});
-await check('settings: the right token is saved', async () => {
-  await page.locator('#admin-token').fill(ADMIN);
-  await page.getByRole('button', { name: 'Save token' }).click();
-  await page.getByText('Admin token saved').waitFor();
+  await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor();
 });
 await check('settings: a Campus is added and its shortcode is upper-cased', async () => {
   const form = page.getByRole('form', { name: 'Add a campus' });
@@ -106,6 +113,24 @@ await check('settings: a Campus with Devices cannot be deleted', async () => {
   await page.getByText(/still has devices/i).first().waitFor({ timeout: 5000 });
 });
 if (SHOTS) await page.screenshot({ path: SHOTS + '/settings.png', fullPage: true });
+await check('settings: a Viewer sees the lists without the controls that change them, and no Users tab', async () => {
+  const viewer = await throwawayUser(API, ADMIN, 'viewer', 'walk-viewer');
+  const looking = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  try {
+    await signInContext(looking, WEB, viewer);
+    const viewerPage = await looking.newPage();
+    await viewerPage.goto(WEB + '/settings');
+    await viewerPage.getByRole('cell', { name: 'CHS', exact: true }).waitFor({ timeout: 5000 });
+    expect(!(await viewerPage.getByRole('button', { name: 'Add campus' }).isVisible().catch(() => false)), 'Add campus shown to a Viewer');
+    expect(!(await viewerPage.getByRole('button', { name: /^Delete / }).first().isVisible().catch(() => false)), 'Delete shown to a Viewer');
+    expect(!(await viewerPage.getByRole('tab', { name: 'Users' }).isVisible().catch(() => false)), 'Users tab shown to a Viewer');
+    const refused = await looking.request.post(WEB + '/api/campuses', { data: { name: 'X', shortcode: 'X' } });
+    expect(refused.status() === 403, "a Viewer's change: " + refused.status());
+  } finally {
+    await looking.close();
+    await viewer.remove();
+  }
+});
 await check('dashboard: the new Device shows with no readings yet', async () => {
   await page.goto(WEB + '/');
   await page.getByRole('article', { name: /MDF/ }).waitFor({ timeout: 5000 });
@@ -276,10 +301,6 @@ await check('settings: the Device and then the Campuses can be deleted', async (
     await page.getByRole('cell', { name, exact: true }).waitFor({ state: 'detached', timeout: 5000 });
   }
 });
-await check('settings: Forget removes the token and the panel asks again', async () => {
-  await page.getByRole('button', { name: 'Forget' }).click();
-  await page.getByText('Admin token needed').waitFor({ timeout: 5000 });
-});
 await check('a11y: Skip to content is the first Tab stop and lands on the page heading', async () => {
   await page.goto(WEB + '/incidents');
   await page.getByRole('heading', { name: 'Incidents', level: 1 }).waitFor();
@@ -295,12 +316,22 @@ await check('a11y: an unknown address is a titled Page not found with a way home
   await page.getByRole('link', { name: 'Go to the dashboard' }).click();
   await page.getByRole('heading', { name: 'Dashboard', level: 1 }).waitFor();
 });
+await check('sign out: the user menu signs out to the sign-in page, and the session is over', async () => {
+  await page.goto(WEB + '/');
+  await page.getByRole('heading', { name: 'Dashboard', level: 1 }).waitFor();
+  await page.getByRole('button', { name: /account menu/ }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  await page.getByRole('heading', { name: 'Sign in', level: 1 }).waitFor({ timeout: 5000 });
+  expect(new URL(page.url()).pathname === '/sign-in', 'url: ' + page.url());
+  expect((await context.request.get(WEB + '/api/session')).status() === 401, 'still signed in');
+});
 await check('no server errors (5xx) and no console errors during the walk', async () => {
   expect(failedRequests.length === 0, 'server errors: ' + failedRequests.join(', '));
   const real = consoleErrors.filter((e) => !/401|403|404|409|422|429|Failed to load resource/.test(e));
   expect(real.length === 0, 'console: ' + real.join(' | '));
 });
 await browser.close();
+await walker.remove();
 const passed = results.filter((r) => r[0]).length;
 console.log(`\n${passed} of ${results.length} checks passed`);
 process.exit(passed === results.length ? 0 : 1);

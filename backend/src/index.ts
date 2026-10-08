@@ -10,6 +10,8 @@ import { createListening } from './listening';
 import { createMailer } from './mailer';
 import { startNotifier } from './notifier';
 import { exitOnSignals, shutDown, type Stoppable } from './shutdown';
+import { createSessions, startSessionSweep } from './sessions';
+import { ensureFirstUser } from './users';
 
 dotenv.config();
 
@@ -34,6 +36,8 @@ async function main(): Promise<void> {
   const pool = createPool(config.database);
   const applied = await runMigrations(pool, { context: migrationContext() });
   if (applied.length > 0) console.log(`Applied migrations: ${applied.join(', ')}`);
+  // A fresh install starts with admin / admin, to be changed at its first sign-in (docs/adr/0010).
+  await ensureFirstUser(pool, new Date(), (line) => console.log(line));
 
   // One client set, shared by the routes and the Offline sweep, so both reach every dashboard.
   const sse = createBroadcaster();
@@ -48,7 +52,12 @@ async function main(): Promise<void> {
   const server = app.listen(config.port, () => {
     console.log(`Server is running on port ${config.port}`);
   });
-  const jobs: Stoppable[] = [startRetentionJob({ config, pool }), startOfflineSweep({ config, pool, sse, listening })];
+  const jobs: Stoppable[] = [
+    startRetentionJob({ config, pool }),
+    startOfflineSweep({ config, pool, sse, listening }),
+    // Expired sessions go, and the live streams they held close; an open stream keeps its session in use.
+    startSessionSweep(createSessions({ pool, sse })),
+  ];
   // Ingest and the sweep queue Incident emails in the outbox; the sender delivers them (docs/adr/0008).
   // A stop lets the pass in flight finish; one cut short by a crash rolls back, and its rows go out from the next process.
   if (mailer !== undefined) {

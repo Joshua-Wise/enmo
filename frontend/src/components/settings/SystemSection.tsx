@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { InlineError, SectionHeader } from './section';
 
 interface SystemSectionProps {
-  /** False while no Admin token is stored: the lines need it to be read at all. */
+  /** True for an Admin: the lines are an Admin's to read. */
   canEdit: boolean;
 }
 
@@ -28,7 +28,7 @@ export function SystemSection({ canEdit }: SystemSectionProps) {
         title="System"
         description="Whether the server, its database, and the boards' links are OK. A line that is not fine says what to do; nothing here is emailed."
       />
-      {canEdit ? <SystemLines /> : <p className="text-sm text-muted-foreground">Enter the Admin token above to see whether the system is OK.</p>}
+      {canEdit ? <SystemLines /> : <p className="text-sm text-muted-foreground">Only an Admin sees whether the system is OK.</p>}
     </section>
   );
 }

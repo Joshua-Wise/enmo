@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pencil, Plus } from 'lucide-react';
-import { addCampus, deleteCampus, getCampuses, getCampusRecipients, UnauthorisedError } from '@/api';
+import { addCampus, deleteCampus, ForbiddenError, getCampuses, getCampusRecipients } from '@/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,23 +14,23 @@ import { EditCampusRecipientsForm } from './EditCampusRecipientsForm';
 import { AnimatedRow, DeleteButton, EmptyRow, ErrorRow, FieldHint, InlineError, InlineForm, SectionHeader, SkeletonRows, StatusLine, WrappingCell } from './section';
 
 interface CampusesSectionProps {
-  /** False while no Admin token is stored; changes are disabled and the token panel explains why. */
+  /** True for an Admin; a Viewer sees the list without the controls that change it. */
   canEdit: boolean;
   onUnauthorised: () => void;
 }
 
-/** A Campus as this section lists it: with its own recipients when the Admin token could read them. */
+/** A Campus as this section lists it: with its own recipients when an Admin reads it. */
 type CampusRow = Campus & { notifyTo?: string[] };
 
 /**
- * The Campuses with their own recipients (docs/adr/0008), which only the Admin token may read. A
- * token the server refuses leaves the list without them; the token panel asks again on a change.
+ * The Campuses with their own recipients (docs/adr/0008), which only an Admin may read. A refusal
+ * (an Admin made a Viewer since the page loaded) leaves the list without them.
  */
 async function getCampusesWithRecipients(): Promise<CampusRow[]> {
   const [campuses, recipients] = await Promise.all([
     getCampuses(),
     getCampusRecipients().catch((error: unknown) => {
-      if (error instanceof UnauthorisedError) return null;
+      if (error instanceof ForbiddenError) return null;
       throw error;
     }),
   ]);
@@ -70,9 +70,10 @@ export function CampusesSection({ canEdit, onUnauthorised }: CampusesSectionProp
     setReturnFocusTo(null);
   }, [returnFocusTo]);
 
-  // Addresses are shown only to the Admin token, which the server asks for to read them.
+  // Addresses are shown only to an Admin, the only one the server lets read them.
   const showRecipients = canEdit;
-  const columns = showRecipients ? 4 : 3;
+  // A Viewer gets neither the recipients nor the actions column.
+  const columns = canEdit ? 4 : 2;
 
   const nameMissing = name.trim() === '';
   const shortcodeMissing = shortcode.trim() === '';
@@ -143,10 +144,12 @@ export function CampusesSection({ canEdit, onUnauthorised }: CampusesSectionProp
         title="Campuses"
         description="Every Device belongs to one Campus. The shortcode is what the dashboard filters by. A Campus may name its own email recipients; without them its email goes to the default ones."
         action={
-          <Button ref={addButton} size="sm" variant="outline" onClick={openForm} disabled={!canEdit || formOpen || editing !== null}>
-            <Plus aria-hidden />
-            Add campus
-          </Button>
+          canEdit && (
+            <Button ref={addButton} size="sm" variant="outline" onClick={openForm} disabled={formOpen || editing !== null}>
+              <Plus aria-hidden />
+              Add campus
+            </Button>
+          )
         }
       />
 
@@ -221,9 +224,11 @@ export function CampusesSection({ canEdit, onUnauthorised }: CampusesSectionProp
               <TableHead>Name</TableHead>
               <TableHead className="w-32">Shortcode</TableHead>
               {showRecipients && <TableHead>Recipients</TableHead>}
-              <TableHead className="w-24">
-                <span className="sr-only">Actions</span>
-              </TableHead>
+              {canEdit && (
+                <TableHead className="w-24">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -265,6 +270,7 @@ export function CampusesSection({ canEdit, onUnauthorised }: CampusesSectionProp
                       )}
                     </WrappingCell>
                   )}
+                  {canEdit && (
                   <TableCell className="whitespace-nowrap text-right">
                     {showRecipients && campus.notifyTo !== undefined && (
                       <Button
@@ -287,12 +293,12 @@ export function CampusesSection({ canEdit, onUnauthorised }: CampusesSectionProp
                       label={`Delete ${campus.name}`}
                       title={`Delete ${campus.name}?`}
                       description={`The ${campus.shortcode} filter disappears from the dashboard. A campus that still has Devices cannot be deleted.`}
-                      disabled={!canEdit}
                       error={remove.error}
                       onConfirm={() => removeCampus(campus.id, campus.name)}
                       onDismiss={remove.clearError}
                     />
                   </TableCell>
+                  )}
                   </AnimatedRow>
                 ),
               )}

@@ -12,7 +12,7 @@ interface EditCampusRecipientsFormProps {
   campus: Campus;
   /** The Campus's own recipients now; empty when it emails the default ones. */
   notifyTo: string[];
-  /** False while no Admin token is stored; the change is disabled and the token panel explains why. */
+  /** True for an Admin, the only one who can save it. */
   canEdit: boolean;
   /** Saved: the list as it now is, which is the same list when nothing was changed. */
   onSaved: (notifyTo: string[]) => Promise<void>;

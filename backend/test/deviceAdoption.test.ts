@@ -47,7 +47,7 @@ describe('a registered Device with the wrong token (token mismatch)', () => {
   after(() => pool.end());
 
   const dashboardDevice = async (hostname: string) => (await client.dashboard.get()).devices.find((d) => d.hostname === hostname) as unknown as ListedDevice;
-  const listedDevice = async (hostname: string) => (await json<ListedDevice[]>(await fetch(client.devices.url()))).find((d) => d.hostname === hostname);
+  const listedDevice = async (hostname: string) => (await json<ListedDevice[]>(await fetch(client.devices.url(), asAdmin()))).find((d) => d.hostname === hostname);
 
   test('is refused, and the dashboard and the Device list say token mismatch for it alone', async () => {
     const refused = await client.readings.add({ device: 'esp-a1b2c3', temp: 70, humidity: 40 }, wrongToken());

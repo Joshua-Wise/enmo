@@ -5,10 +5,24 @@
 #include "config.h"
 #include "roots.h"
 
-static const unsigned long HTTP_TIMEOUT_MS = 10 * 1000UL;
+// The fallback server is optional: a config.h from before firmware 10 names none, and an empty
+// SERVER_URL_2 is none too.
+#ifndef SERVER_URL_2
+#define SERVER_URL_2 ""
+#endif
 
-// SERVER_URL without a trailing slash, read once.
-static String baseUrl;
+// sizeof a string literal counts its NUL, so an empty SERVER_URL_2 is 1: no fallback server.
+static const uint8_t SERVER_COUNT = sizeof(SERVER_URL_2) > 1 ? 2 : 1;
+// Failed reports in a row before moving to the other server: one miss is not an outage.
+static const uint8_t FAILURES_TO_MOVE = 2;
+// How long the board stays on the fallback server before trying SERVER_URL again.
+static const unsigned long RETRY_FIRST_MS = 60 * 60 * 1000UL;
+
+// SERVER_URL and SERVER_URL_2 without a trailing slash, read once, and which is in use.
+static String baseUrls[2];
+static uint8_t current = 0;
+static uint8_t failures = 0;
+static unsigned long movedAt = 0;
 
 // Over https:// the server's certificate must chain to a Let's Encrypt root and name SERVER_URL's
 // host, as a browser checks it (docs/adr/0001), before the token is sent. Any key or certificate
@@ -53,7 +67,7 @@ static time_t serverTime() {
     BearSSL::WiFiClientSecure client;
     client.setInsecure();
     HTTPClient http;
-    http.setTimeout(HTTP_TIMEOUT_MS);
+    http.setTimeout(SERVER_TIMEOUT_MS);
     const char* wanted[] = {"Date"};
     if (http.begin(client, serverUrl("/api/health"))) {
       http.collectHeaders(wanted, 1);
@@ -70,10 +84,24 @@ static time_t serverTime() {
   return clockBase == 0 ? 0 : clockBase + (time_t)((millis() - clockTakenAt) / 1000);
 }
 
+static void printServer() {
+  Serial.print(baseUrls[current]);
+  if (current == 1) Serial.print(F(" (fallback server)"));
+}
+
 void serverBegin() {
-  baseUrl = SERVER_URL;
-  if (baseUrl.endsWith("/")) baseUrl.remove(baseUrl.length() - 1);  // forgive the common typo
-  if (!serverUsesTls()) return;
+  const char* const urls[] = {SERVER_URL, SERVER_URL_2};
+  bool anyTls = false;
+  for (uint8_t i = 0; i < SERVER_COUNT; i++) {
+    baseUrls[i] = urls[i];
+    if (baseUrls[i].endsWith("/")) baseUrls[i].remove(baseUrls[i].length() - 1);  // forgive the common typo
+    anyTls = anyTls || baseUrls[i].startsWith("https://");
+  }
+  if (SERVER_COUNT > 1) {
+    Serial.print(F("server: fallback "));
+    Serial.println(baseUrls[1]);
+  }
+  if (!anyTls) return;
   // Each PEM is copied out of flash only while it is parsed; the list keeps the decoded roots.
   for (size_t i = 0; i < LETS_ENCRYPT_ROOT_COUNT; i++) {
     String pem = FPSTR(LETS_ENCRYPT_ROOTS[i]);
@@ -85,11 +113,38 @@ void serverBegin() {
 }
 
 String serverUrl(const char* path) {
-  return baseUrl + path;
+  return baseUrls[current] + path;
 }
 
 bool serverUsesTls() {
-  return baseUrl.startsWith("https://");
+  return baseUrls[current].startsWith("https://");
+}
+
+uint8_t serverNumber() {
+  return current + 1;
+}
+
+static void moveTo(uint8_t index, const __FlashStringHelper* why) {
+  current = index;
+  failures = 0;
+  movedAt = millis();
+  clockBase = 0;  // the time comes from the server in use
+  Serial.print(F("server: "));
+  Serial.print(why);
+  Serial.print(F(", now "));
+  printServer();
+  Serial.println();
+}
+
+void serverReportTaken(bool taken) {
+  if (SERVER_COUNT < 2) return;
+  if (taken) {
+    failures = 0;
+    // Unsigned elapsed time, right across millis() wrapping.
+    if (current == 1 && millis() - movedAt >= RETRY_FIRST_MS) moveTo(0, F("trying the first server again"));
+    return;
+  }
+  if (++failures >= FAILURES_TO_MOVE) moveTo(current ^ 1, F("reports not taken"));
 }
 
 const __FlashStringHelper* serverSecure(BearSSL::WiFiClientSecure& client) {

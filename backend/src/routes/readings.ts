@@ -1,7 +1,7 @@
 import { Router, type Request, type RequestHandler } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { deviceTokenOf, requireAdminToken } from '../auth';
+import { deviceTokenOf } from '../auth';
 import type { RouteDeps } from '../deps';
 import { closetType } from '../closet';
 import { SELECT_DEVICES, toDevice, type DeviceRow } from './devices';
@@ -466,9 +466,9 @@ function parseDay(query: Request['query'], now: Date): LocalDay | { error: strin
  * One Device's history (mounted at /api/devices/:id/history).
  * GET returns one local day of Readings with the day's numbers; never more than a day or
  * HISTORY_ROW_LIMIT rows, so the page stays fast however long the Device has been reporting.
- * DELETE resets the Device's whole history, with the Admin token.
+ * DELETE resets the Device's whole history, as an Admin.
  */
-export function historyRouter({ pool, config, now = () => new Date() }: RouteDeps): Router {
+export function historyRouter({ pool, config, auth, now = () => new Date() }: RouteDeps): Router {
   // mergeParams: the Device id is in the mount path, not this router's own, so it is untyped here.
   const router = Router({ mergeParams: true });
   const deviceIdOf = (req: Request): string => (req.params as { id?: string }).id ?? '';
@@ -524,7 +524,7 @@ export function historyRouter({ pool, config, now = () => new Date() }: RouteDep
     }
   });
 
-  router.delete('/', requireAdminToken(config), async (req, res, next) => {
+  router.delete('/', auth.admin, async (req, res, next) => {
     try {
       const device = await findDevice(deviceIdOf(req));
       if (device === undefined) {

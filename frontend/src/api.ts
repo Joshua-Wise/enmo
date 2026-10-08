@@ -1,6 +1,6 @@
-import type { Device, DeviceRotation, PendingDevice, FirmwareRelease, FirmwareStatus, Campus, CampusRecipients, Dashboard, DashboardOrder, History, Incident, Incidents, MonthlyReportQueued, NotificationStatus, Overview, SystemHealth, TestEmailResult } from './types';
-import { getAdminToken } from './lib/adminToken';
+import type { Device, DeviceRotation, PendingDevice, FirmwareRelease, FirmwareStatus, Campus, CampusRecipients, Dashboard, DashboardOrder, History, Incident, Incidents, MonthlyReportQueued, NotificationStatus, Overview, SessionInfo, SystemHealth, TestEmailResult, User, UserRole } from './types';
 import { apiBaseUrl } from './lib/apiBase';
+import { sessionEnded } from './lib/session';
 
 const API_BASE_URL = apiBaseUrl(import.meta.env.VITE_API_URL);
 
@@ -15,11 +15,19 @@ export class ApiError extends Error {
   }
 }
 
-/** The server rejected the Admin token (or none was sent). */
+/** No one is signed in any more: the session ended, expired, or was never there. The page goes to sign-in. */
 export class UnauthorisedError extends ApiError {
   constructor() {
-    super(401, 'The Admin token was not accepted');
+    super(401, 'Your session has ended. Sign in again.');
     this.name = 'UnauthorisedError';
+  }
+}
+
+/** Signed in, but not allowed: a Viewer asking for a change, say. Carries the server's sentence. */
+export class ForbiddenError extends ApiError {
+  constructor(message: string) {
+    super(403, message);
+    this.name = 'ForbiddenError';
   }
 }
 
@@ -32,10 +40,10 @@ export function describeError(error: unknown): string {
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
-  /** A read only the admin may make: it carries the Admin token too. */
-  admin?: boolean;
   /** A file sent as it is (application/octet-stream) instead of a JSON body. */
   raw?: Blob;
+  /** A 401 here is an answer, not a session ending (signing in, changing a password). */
+  quietUnauthorised?: boolean;
 }
 
 async function errorMessage(response: Response): Promise<string> {
@@ -49,47 +57,86 @@ async function errorMessage(response: Response): Promise<string> {
 }
 
 /**
- * The one place requests are made. Reads carry no token (unless `admin`); anything else carries
- * the stored Admin token and turns a 401 into an UnauthorisedError.
+ * The one place requests are made, each with the session cookie. Every change is sent as JSON, body
+ * or not, since the server refuses a change made with the cookie in any form a page on another site
+ * could send (docs/adr/0010). A 401 means the session is over: the session store hears it and the
+ * page goes to sign-in.
  */
-async function request<T>(path: string, { method = 'GET', body, admin = false, raw }: RequestOptions = {}): Promise<T> {
+async function request<T>(path: string, { method = 'GET', body, raw, quietUnauthorised = false }: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = {};
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (raw !== undefined) headers['Content-Type'] = 'application/octet-stream';
-  if (method !== 'GET' || admin) {
-    const token = getAdminToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
+  if (method !== 'GET') headers['Content-Type'] = raw === undefined ? 'application/json' : 'application/octet-stream';
 
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       method,
       headers,
+      credentials: 'include',
       body: raw ?? (body === undefined ? undefined : JSON.stringify(body)),
     });
   } catch (error) {
     throw new ApiError(0, 'Could not reach the server', { cause: error });
   }
 
-  if (response.status === 401) throw new UnauthorisedError();
+  if (response.status === 401 && !quietUnauthorised) {
+    sessionEnded();
+    throw new UnauthorisedError();
+  }
+  if (response.status === 403) throw new ForbiddenError(await errorMessage(response));
   if (!response.ok) throw new ApiError(response.status, await errorMessage(response));
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
+// ==================== SESSION ====================
+
+/** Who is signed in in this browser; an UnauthorisedError when no one is. */
+export const getSession = (): Promise<SessionInfo> => request('/api/session');
+
+/** Sign in. A refusal ("Wrong username or password", or too many tries) is an ApiError with the server's sentence. */
+export const signIn = (username: string, password: string): Promise<SessionInfo> =>
+  request('/api/session', { method: 'POST', body: { username, password }, quietUnauthorised: true });
+
+export const signOut = (): Promise<void> => request('/api/session', { method: 'DELETE', quietUnauthorised: true });
+
+/** Change the signed-in user's own password; the current one is required. Their other sessions end. */
+export const changeOwnPassword = (currentPassword: string, newPassword: string): Promise<SessionInfo> =>
+  request('/api/session/password', { method: 'POST', body: { currentPassword, newPassword } });
+
+// ==================== USERS ====================
+
+/** Everyone who may sign in. An Admin only. */
+export const getUsers = (): Promise<User[]> => request('/api/users');
+
+/** Add a user with a starting password. An Admin only. */
+export const addUser = (username: string, role: UserRole, password: string): Promise<User> =>
+  request('/api/users', { method: 'POST', body: { username, role, password } });
+
+/** What an Admin may change about a user. */
+export interface UserEdit {
+  role?: UserRole;
+  disabled?: boolean;
+  password?: string;
+}
+
+/** Change a role, disable or enable, or set a new password (their sessions end). An Admin only. */
+export const updateUser = (id: number, changes: UserEdit): Promise<User> => request(`/api/users/${id}`, { method: 'PATCH', body: changes });
+
+/** Delete a user; their sessions end. An Admin only. */
+export const deleteUser = (id: number): Promise<void> => request(`/api/users/${id}`, { method: 'DELETE' });
+
 // ==================== CAMPUSES ====================
 
 export const getCampuses = (): Promise<Campus[]> => request('/api/campuses');
 
-/** Add a Campus, with its own recipients (comma-separated) or none to email NOTIFY_TO. Needs the Admin token. */
+/** Add a Campus, with its own recipients (comma-separated) or none to email NOTIFY_TO. An Admin only. */
 export const addCampus = (name: string, shortcode: string, notifyTo = ''): Promise<Campus> =>
   request('/api/campuses', { method: 'POST', body: { name, shortcode, notifyTo } });
 
-/** Every Campus's own recipients, empty for one that emails NOTIFY_TO. Needs the Admin token. */
-export const getCampusRecipients = (): Promise<CampusRecipients[]> => request('/api/campuses/recipients', { admin: true });
+/** Every Campus's own recipients, empty for one that emails NOTIFY_TO. An Admin only. */
+export const getCampusRecipients = (): Promise<CampusRecipients[]> => request('/api/campuses/recipients');
 
-/** Replace a Campus's own recipients (comma-separated); empty sends its email to NOTIFY_TO. Needs the Admin token. */
+/** Replace a Campus's own recipients (comma-separated); empty sends its email to NOTIFY_TO. An Admin only. */
 export const setCampusRecipients = (id: number, notifyTo: string): Promise<Campus & CampusRecipients> =>
   request(`/api/campuses/${id}`, { method: 'PATCH', body: { notifyTo } });
 
@@ -113,54 +160,54 @@ export interface DeviceEdit {
   campusId?: number;
 }
 
-/** Correct a Device's Closet or move it to another Campus; its Readings stay. Needs the Admin token. */
+/** Correct a Device's Closet or move it to another Campus; its Readings stay. An Admin only. */
 export const editDevice = (id: number, changes: DeviceEdit): Promise<Device> =>
   request(`/api/devices/${id}`, { method: 'PATCH', body: changes });
 
 export const deleteDevice = (id: number): Promise<void> => request(`/api/devices/${id}`, { method: 'DELETE' });
 
-/** Boards reporting with the Device token that nobody has registered yet. Needs the Admin token. */
-export const getPendingDevices = (): Promise<PendingDevice[]> => request('/api/devices/pending', { admin: true });
+/** Boards reporting with the Device token that nobody has registered yet. An Admin only. */
+export const getPendingDevices = (): Promise<PendingDevice[]> => request('/api/devices/pending');
 
-/** Hide a waiting board from the pop-up (or show it again). Needs the Admin token. */
+/** Hide a waiting board from the pop-up (or show it again). An Admin only. */
 export const setPendingIgnored = (hostname: string, ignored: boolean): Promise<unknown> =>
   request(`/api/devices/pending/${encodeURIComponent(hostname)}`, { method: 'PATCH', body: { ignored } });
 
-/** Drop a waiting board from the list until it reports again. Needs the Admin token. */
+/** Drop a waiting board from the list until it reports again. An Admin only. */
 export const forgetPendingDevice = (hostname: string): Promise<void> =>
   request(`/api/devices/pending/${encodeURIComponent(hostname)}`, { method: 'DELETE' });
 
-/** The published firmware release and the version each Device last reported. Needs the Admin token. */
-export const getFirmwareStatus = (): Promise<FirmwareStatus> => request('/api/firmware/status', { admin: true });
+/** The published firmware release and the version each Device last reported. An Admin only. */
+export const getFirmwareStatus = (): Promise<FirmwareStatus> => request('/api/firmware/status');
 
-/** Publish a signed build (the .bin.signed) to every Device, or only to `only`. Needs the Admin token. */
+/** Publish a signed build (the .bin.signed) to every Device, or only to `only`. An Admin only. */
 export const publishFirmware = (image: Blob, only: string[] = []): Promise<FirmwareRelease> =>
   request(`/api/firmware${only.length > 0 ? `?${new URLSearchParams({ only: only.join(',') })}` : ''}`, { method: 'POST', raw: image });
 
-/** "Release to all": offer a staged build to every Device. Refused (409) while it is held. Needs the Admin token. */
+/** "Release to all": offer a staged build to every Device. Refused (409) while it is held. An Admin only. */
 export const widenFirmware = (): Promise<FirmwareRelease> => request('/api/firmware/widen', { method: 'POST' });
 
-/** Stop offering the published build; boards keep what they run. Needs the Admin token. */
+/** Stop offering the published build; boards keep what they run. An Admin only. */
 export const withdrawFirmware = (): Promise<void> => request('/api/firmware', { method: 'DELETE' });
 
-/** Which Devices still report with the previous Device token during a rotation. Needs the Admin token. */
-export const getDeviceRotation = (): Promise<DeviceRotation> => request('/api/devices/rotation', { admin: true });
+/** Which Devices still report with the previous Device token during a rotation. An Admin only. */
+export const getDeviceRotation = (): Promise<DeviceRotation> => request('/api/devices/rotation');
 
 // ==================== NOTIFICATIONS ====================
 
-/** Whether Incidents are emailed, to whom, and how the last send went. Needs the Admin token. */
-export const getNotificationStatus = (): Promise<NotificationStatus> => request('/api/notifications/status', { admin: true });
+/** Whether Incidents are emailed, to whom, and how the last send went. An Admin only. */
+export const getNotificationStatus = (): Promise<NotificationStatus> => request('/api/notifications/status');
 
-/** Send a test email to the default recipients (NOTIFY_TO) now; at most one a minute. Needs the Admin token. */
+/** Send a test email to the default recipients (NOTIFY_TO) now; at most one a minute. An Admin only. */
 export const sendTestEmail = (): Promise<TestEmailResult> => request('/api/notifications/test', { method: 'POST' });
 
-/** Queue the report on last month for the default recipients (NOTIFY_TO); at most one a minute. Needs the Admin token. */
+/** Queue the report on last month for the default recipients (NOTIFY_TO); at most one a minute. An Admin only. */
 export const sendMonthlyReport = (): Promise<MonthlyReportQueued> => request('/api/notifications/report', { method: 'POST' });
 
 // ==================== SYSTEM ====================
 
-/** Whether the system itself is OK, line by line (Settings, System). Needs the Admin token. */
-export const getSystemHealth = (): Promise<SystemHealth> => request('/api/system', { admin: true });
+/** Whether the system itself is OK, line by line (Settings, System). An Admin only. */
+export const getSystemHealth = (): Promise<SystemHealth> => request('/api/system');
 
 // ==================== DASHBOARD ====================
 
@@ -180,7 +227,7 @@ export const getDashboard = (campus?: string, order: DashboardOrder = 'worst'): 
  * The live stream of Readings (Server-Sent Events). The browser reconnects on its own after
  * a drop; callers watch `readyState` and reload their data once it is open again.
  */
-export const openDashboardStream = (): EventSource => new EventSource(`${API_BASE_URL}/api/dashboard/stream`);
+export const openDashboardStream = (): EventSource => new EventSource(`${API_BASE_URL}/api/dashboard/stream`, { withCredentials: true });
 
 // ==================== HISTORY ====================
 
@@ -201,7 +248,7 @@ export const getHistory = (deviceId: number, date?: string): Promise<History> =>
 export const readingsCsvUrl = (deviceId: number, from: string, to: string): string =>
   `${API_BASE_URL}/api/devices/${deviceId}/readings.csv?${new URLSearchParams({ from, to, tz: browserTimeZone() })}`;
 
-/** Delete every Reading the Device has. Needs the Admin token. */
+/** Delete every Reading the Device has. An Admin only. */
 export const resetHistory = (deviceId: number): Promise<void> =>
   request(`/api/devices/${deviceId}/history`, { method: 'DELETE' });
 
@@ -225,7 +272,7 @@ export const incidentsCsvUrl = (from: Date, to: Date, deviceId?: number): string
 
 /**
  * Say who is on an open incident: a name or a short note. The first acknowledgement stands; a
- * repeat answers the incident as it is. Needs the Admin token.
+ * repeat answers the incident as it is. An Admin only.
  */
 export const acknowledgeIncident = (id: number, by: string): Promise<Incident> =>
   request(`/api/incidents/${id}/acknowledge`, { method: 'POST', body: { by } });

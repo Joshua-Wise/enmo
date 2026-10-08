@@ -53,6 +53,8 @@ DOWN=0
 FINISH=0
 FORCE=0
 ONLY=""
+# The user reset-admin-password sets a password on; `admin` unless --user names another.
+ADMIN_USER=""
 SMTP_HOST_OPT=""
 SMTP_PORT_OPT=""
 SMTP_SECURE_OPT=""
@@ -125,6 +127,10 @@ With no action and a terminal, shows a menu. Actions:
   firmware-status    The published build, who it is offered to and where each of them is on the
                      way to it, and the version each Device runs
   withdraw-firmware  Stop offering the published build; boards keep what they run
+  reset-admin-password  A locked-out owner's way back in: type a new password (not shown) for the
+                     user admin (--user NAME for another), which becomes an enabled Admin with it,
+                     created if missing; its sessions end. With --yes the password is the first
+                     line of stdin. Never on the command line.
   stop               Stop the containers; data and settings stay
   uninstall          Remove containers and built images; --wipe also deletes the database
                      (typed confirmation). .env and backups/ stay.
@@ -215,6 +221,7 @@ parse_args() {
       --force) FORCE=1; PASS_ARGS+=("$1") ;;
       --only) need_value "$@"; ONLY=$2; PASS_ARGS+=("$1" "$2"); shift ;;
       --file) need_value "$@"; FILE=$2; PASS_ARGS+=("$1" "$2"); shift ;;
+      --user) need_value "$@"; ADMIN_USER=$2; PASS_ARGS+=("$1" "$2"); shift ;;
       --follow|-f) FOLLOW=1; PASS_ARGS+=("$1") ;;
       --service) need_value "$@"; SERVICE=$2; PASS_ARGS+=("$1" "$2"); shift ;;
       --tail) need_value "$@"; TAIL=$2; PASS_ARGS+=("$1" "$2"); shift ;;
@@ -1006,7 +1013,7 @@ do_deploy() {
   step "Health through web"
   health 30 || die "the stack is up but /api/health through web failed; see: deploy.sh logs"
   say ""
-  say "${C_GREEN}Deployed.${C_OFF} Dashboard: $(site_url)  (Settings needs the Admin token: deploy.sh info --reveal)"
+  say "${C_GREEN}Deployed.${C_OFF} Dashboard: $(site_url)  (a fresh install signs in as admin / admin, then asks for a new password)"
 }
 
 do_status() {
@@ -1132,7 +1139,7 @@ do_info() {
   interval=$(env_get REPORT_INTERVAL_SECONDS)
   step "Temperature Alarms ($(project_name))"
   say "  Dashboard     $url"
-  say "  Admin token   $(mask "$(env_get ADMIN_TOKEN)")   (Settings page)"
+  say "  Admin token   $(mask "$(env_get ADMIN_TOKEN)")   (scripts: bench.py, e2e; people sign in)"
   say "  Device token  $(mask "$(env_get DEVICE_TOKEN)")"
   [ -n "$(env_get DEVICE_TOKEN_PREVIOUS)" ] && say "  Previous      $(mask "$(env_get DEVICE_TOKEN_PREVIOUS)")   (still accepted: rotate-device-token --finish ends that)"
   say "  DB password   $(mask "$(env_get DB_PASSWORD)")"
@@ -1259,6 +1266,31 @@ do_withdraw_firmware() {
   firmware_cli withdraw
 }
 
+# --- Users (docs/adr/0010) ---------------------------------------------------------------
+# The password goes into api as the first line of stdin, never as an argument any process on the
+# host can read; backend/src/userCli.ts checks it and sets it.
+do_reset_admin_password() {
+  step "Reset an Admin's password"
+  local user=${ADMIN_USER:-admin} pw="" again=""
+  case "$user" in *[!A-Za-z0-9._@-]*) die "--user takes a username: letters, digits, and . _ @ -" ;; esac
+  running api || die "api is not running; start the stack first (deploy.sh deploy)"
+  if interactive; then
+    read -r -s -p "  New password for $user (not shown; 8 characters or more): " pw || true
+    printf '\n' >&2
+    read -r -s -p "  The same again: " again || true
+    printf '\n' >&2
+    [ "$pw" = "$again" ] || die "the two did not match; nothing changed"
+  elif [ -t 0 ]; then
+    die "with --yes the password is read from stdin, and stdin is this terminal. Pipe it in (read -rs PW; printf '%s\\n' \"\$PW\" | deploy/deploy.sh reset-admin-password --yes), or leave out --yes to type it at a hidden prompt"
+  else
+    IFS= read -r pw || true
+  fi
+  # Windows PowerShell pipes lines with CRLF.
+  pw=${pw%$'\r'}
+  [ ${#pw} -ge 8 ] || die "a password needs at least 8 characters; nothing changed"
+  printf '%s\n' "$pw" | dc exec -T api node dist/userCli.js reset-admin-password "$user" || die "not reset; see the line above"
+}
+
 do_stop() {
   step "Stop"
   dc stop && ok "stopped; data and .env kept. Start again with: deploy.sh deploy"
@@ -1334,7 +1366,8 @@ do_demo() {
   say "${C_GREEN}Demo running.${C_OFF} Dashboard: $(site_url)"
   say "  The first minute seeds 4 Campuses and 24 Devices and writes a week of history; then"
   say "  the closets loop through Hot, Dry, Mold risk, Cold, late, and Offline every 10 minutes."
-  say "  Admin token for Settings (throwaway): $(env_get ADMIN_TOKEN)"
+  say "  Sign in as admin / admin, then choose a new password (this demo's own database)."
+  say "  Admin token for scripts (throwaway): $(env_get ADMIN_TOKEN)"
   say "  Watch it:  docker compose -p $DEMO_PROJECT logs -f demo"
   say "  Remove it: deploy/deploy.sh demo --down"
 }
@@ -1579,6 +1612,7 @@ run_action() {
     publish-firmware) do_publish_firmware ;;
     firmware-status) do_firmware_status ;;
     withdraw-firmware) do_withdraw_firmware ;;
+    reset-admin-password) do_reset_admin_password ;;
     stop) do_stop ;;
     uninstall) do_uninstall ;;
     demo) do_demo ;;
@@ -1599,6 +1633,7 @@ menu() {
     say "   7) Restore the database     14) Demo, no hardware needed"
     say "  15) Rotate the Device token  16) Finish the Device token rotation"
     say "  17) Firmware status          18) Publish firmware (asks for the file)"
+    say "  19) Reset an Admin's password"
     say "   q) Quit"
     read -r -p "  Choose: " choice || exit 0
     case "$choice" in
@@ -1608,12 +1643,13 @@ menu() {
       13) action=unschedule-backup ;; 14) action=demo ;; 15) action=rotate-device-token ;;
       16) action=rotate-device-token; FINISH=1 ;; 17) action=firmware-status ;;
       18) action=publish-firmware; FILE=$(ask "The .bin.signed to publish" "") ;;
+      19) action=reset-admin-password; ADMIN_USER=$(ask "Which user" "admin") ;;
       q|Q|quit|exit) exit 0 ;;
       *) warn "no such choice"; continue ;;
     esac
     # A subshell, so a failed action returns to the menu instead of exiting it.
     ( legacy_root_env; run_action "$action" ) || warn "$action did not finish"
-    FILE=""; REVEAL=0; WIPE=0; FINISH=0
+    FILE=""; REVEAL=0; WIPE=0; FINISH=0; ADMIN_USER=""
   done
 }
 

@@ -22,7 +22,7 @@ import type { DeviceProgress, FirmwareRelease, FirmwareStatus } from '@/types';
 import { DeleteButton, FieldHint, InlineError, InlineForm, SectionHeader, StatusLine } from './section';
 
 interface FirmwareSectionProps {
-  /** False while no Admin token is stored: the release and the versions need it to be read at all. */
+  /** True for an Admin: the release and the versions are an Admin's to read. */
   canEdit: boolean;
   onUnauthorised: () => void;
 }
@@ -65,7 +65,7 @@ export function FirmwareSection({ canEdit, onUnauthorised }: FirmwareSectionProp
       {canEdit ? (
         <FirmwareStatusAndPublish onUnauthorised={onUnauthorised} />
       ) : (
-        <p className="text-sm text-muted-foreground">Enter the Admin token above to see the published firmware and publish a new build.</p>
+        <p className="text-sm text-muted-foreground">Only an Admin sees the published firmware and publishes a new build.</p>
       )}
     </section>
   );

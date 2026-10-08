@@ -10,7 +10,7 @@ web
 
 ## Users
 
-Network technicians at a school district, at a laptop. They open the site deliberately when checking on the closets they look after, and go to a Device's history when something looks wrong. The same people add Devices and Campuses now and then with the shared Admin token; that is another hat, not a second audience. A dashboard left on a wall screen is a secondary case, not the one the design is built around.
+Network technicians at a school district, at a laptop. They open the site deliberately when checking on the closets they look after, and go to a Device's history when something looks wrong. The same people add Devices and Campuses now and then, signed in as an Admin; that is another hat, not a second audience. Everyone signs in, wall screens included; a Viewer can look but not change anything. A dashboard left on a wall screen is a secondary case, not the one the design is built around.
 
 IT leadership at Celina ISD is the second audience (decided 2026-10-05). They want the district's state in one look, weekly or before a meeting: which Campuses need attention, how the week went, and how long each has gone without an incident. They read; they do not add Devices or run History day by day. The technicians also gain a morning job: reading what happened overnight, incident by incident. The comps that set this direction are `.scratch/design/comps/campuses.html` (Campus overview) and `incidents.html` (Incident timeline); the wall screen and facilities views were not chosen.
 

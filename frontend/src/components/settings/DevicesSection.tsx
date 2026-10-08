@@ -18,7 +18,7 @@ import { EditDeviceForm } from './EditDeviceForm';
 import { AnimatedRow, DeleteButton, EmptyRow, ErrorRow, FieldHint, InlineError, InlineForm, SectionHeader, SkeletonRows, StatusLine, WrappingCell } from './section';
 
 interface DevicesSectionProps {
-  /** False while no Admin token is stored; changes are disabled and the token panel explains why. */
+  /** True for an Admin; a Viewer sees the list without the controls that change it. */
   canEdit: boolean;
   onUnauthorised: () => void;
 }
@@ -128,6 +128,8 @@ export function DevicesSection({ canEdit, onUnauthorised }: DevicesSectionProps)
 
   const campusOptions = campuses.state.status === 'ready' ? campuses.state.data : [];
   const noCampuses = campuses.state.status === 'ready' && campusOptions.length === 0;
+  // A Viewer gets no actions column.
+  const columns = canEdit ? COLUMNS : COLUMNS - 1;
 
   return (
     <section className="space-y-4" aria-labelledby="devices-heading">
@@ -136,10 +138,12 @@ export function DevicesSection({ canEdit, onUnauthorised }: DevicesSectionProps)
         title="Devices"
         description="One Device per Closet, identified by its ESP_ hostname. Deleting a Device deletes its Readings."
         action={
-          <Button ref={addButton} size="sm" variant="outline" onClick={openForm} disabled={!canEdit || formOpen || editing !== null}>
-            <Plus aria-hidden />
-            Add device
-          </Button>
+          canEdit && (
+            <Button ref={addButton} size="sm" variant="outline" onClick={openForm} disabled={formOpen || editing !== null}>
+              <Plus aria-hidden />
+              Add device
+            </Button>
+          )
         }
       />
 
@@ -234,23 +238,25 @@ export function DevicesSection({ canEdit, onUnauthorised }: DevicesSectionProps)
               <TableHead>Hostname</TableHead>
               <TableHead>Campus</TableHead>
               <TableHead>Closet</TableHead>
-              <TableHead className="w-24">
-                <span className="sr-only">Actions</span>
-              </TableHead>
+              {canEdit && (
+                <TableHead className="w-24">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {state.status === 'loading' && <SkeletonRows columns={COLUMNS} />}
-            {state.status === 'error' && <ErrorRow colSpan={COLUMNS} message={`Could not load devices. ${state.message}`} onRetry={reload} />}
+            {state.status === 'loading' && <SkeletonRows columns={columns} />}
+            {state.status === 'error' && <ErrorRow colSpan={columns} message={`Could not load devices. ${state.message}`} onRetry={reload} />}
             {state.status === 'ready' && state.data.length === 0 && (
-              <EmptyRow colSpan={COLUMNS} title="No devices yet" hint="Add a Device by its hostname to see it on the dashboard." />
+              <EmptyRow colSpan={columns} title="No devices yet" hint="Add a Device by its hostname to see it on the dashboard." />
             )}
             <AnimatePresence initial={false}>
               {state.status === 'ready' &&
                 state.data.map((device) =>
                   editing?.id === device.id ? (
                   <AnimatedRow key={device.id} className="hover:bg-transparent">
-                    <TableCell colSpan={COLUMNS} className="whitespace-normal p-2">
+                    <TableCell colSpan={columns} className="whitespace-normal p-2">
                       <EditDeviceForm
                         device={editing}
                         campuses={campusOptions}
@@ -278,6 +284,7 @@ export function DevicesSection({ canEdit, onUnauthorised }: DevicesSectionProps)
                       {device.campus.name} <span className="text-sm text-muted-foreground">{device.campus.shortcode}</span>
                     </WrappingCell>
                     <WrappingCell>{device.closet}</WrappingCell>
+                    {canEdit && (
                     <TableCell className="whitespace-nowrap text-right">
                       <Button
                         ref={(element) => {
@@ -286,9 +293,9 @@ export function DevicesSection({ canEdit, onUnauthorised }: DevicesSectionProps)
                         }}
                         variant="ghost"
                         size="icon-sm"
-                        disabled={!canEdit || editing !== null || formOpen}
+                        disabled={editing !== null || formOpen}
                         aria-label={`Edit ${device.hostname}`}
-                        title={canEdit ? `Edit ${device.hostname}` : 'Enter the Admin token to edit'}
+                        title={`Edit ${device.hostname}`}
                         className="text-muted-foreground hover:text-foreground"
                         onClick={() => startEdit(device)}
                       >
@@ -298,12 +305,12 @@ export function DevicesSection({ canEdit, onUnauthorised }: DevicesSectionProps)
                         label={`Delete ${device.hostname}`}
                         title={`Delete ${device.hostname}?`}
                         description={`Every Reading from ${device.closet} at ${device.campus.name} is deleted with it. Add the Device again to store new Readings.`}
-                        disabled={!canEdit}
                         error={remove.error}
                         onConfirm={() => removeDevice(device.id, device.hostname)}
                         onDismiss={remove.clearError}
                       />
                     </TableCell>
+                    )}
                   </AnimatedRow>
                 ),
               )}

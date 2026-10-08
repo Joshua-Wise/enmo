@@ -1,7 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { RowDataPacket } from 'mysql2/promise';
-import { requireAdminToken } from '../auth';
 import { parseAddressList, type NotificationsConfig } from '../config';
 import type { RouteDeps } from '../deps';
 import { MailerError, type Email } from '../mailer';
@@ -42,7 +41,7 @@ interface CampusListRow extends RowDataPacket {
 }
 
 /**
- * Email notifications (docs/adr/0008), all behind the Admin token. GET /api/notifications/status
+ * Email notifications (docs/adr/0008), all for an Admin. GET /api/notifications/status
  * says whether they are on, through which relay, to whom, whether the monthly report is, when quiet
  * hours are, how the last send went, and how many wait in the outbox (and how many of those quiet
  * hours hold, until when) or were given up on; and for each recipient list (NOTIFY_TO, and each
@@ -51,9 +50,9 @@ interface CampusListRow extends RowDataPacket {
  * POST /api/notifications/report queues the report on last month in the outbox, at most one a
  * minute, and answers 202 with the month; the sender emails it to NOTIFY_TO within seconds.
  */
-export function notificationsRouter({ config, pool, mailer, now = () => new Date() }: RouteDeps): Router {
+export function notificationsRouter({ config, pool, auth, mailer, now = () => new Date() }: RouteDeps): Router {
   const router = Router();
-  const adminOnly = requireAdminToken(config);
+  const adminOnly = auth.admin;
   const notifications = config.notifications;
 
   // The test email skips the outbox, so its result is kept here, for this process only. Incident
@@ -80,7 +79,7 @@ export function notificationsRouter({ config, pool, mailer, now = () => new Date
             }));
       res.json({
         enabled: notifications !== undefined,
-        // Addresses are shown: whoever holds the Admin token already holds .env. The password never is.
+        // Addresses are shown: an Admin sees what .env names. The password never is.
         relay: notifications === undefined ? null : { host: notifications.smtp.host, port: notifications.smtp.port, secure: notifications.smtp.secure },
         from: notifications?.from ?? null,
         recipients: notifications?.to ?? [],

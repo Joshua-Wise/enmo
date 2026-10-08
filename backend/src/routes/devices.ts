@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { requireAdminToken } from '../auth';
 import type { RouteDeps } from '../deps';
 import { isDuplicateKey, isMissingForeignRow } from '../db';
 import { parseDevice, parseDeviceEdit } from '../deviceInput';
@@ -28,10 +27,10 @@ export function toDevice({ id, hostname, closet, campusId, campusName, campusSho
   return { id, hostname, closet, campus: { id: campusId, name: campusName, shortcode: campusShortcode } };
 }
 
-/** Device routes: anyone may list; adding, editing, deleting, and the rotation list need the Admin token. */
-export function devicesRouter({ pool, config, rotation, sightings }: RouteDeps): Router {
+/** Device routes: any signed-in user may list; adding, editing, deleting, and the rotation list need an Admin (auth.ts). */
+export function devicesRouter({ pool, config, auth, rotation, sightings }: RouteDeps): Router {
   const router = Router();
-  const adminOnly = requireAdminToken(config);
+  const adminOnly = auth.admin;
 
   router.get('/', async (_req, res, next) => {
     try {

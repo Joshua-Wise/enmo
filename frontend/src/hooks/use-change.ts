@@ -1,14 +1,15 @@
 import { useCallback, useState } from 'react';
 import { describeError, UnauthorisedError } from '@/api';
 
-/** How a change ended: done, refused for want of the Admin token, or failed with a message to show. */
+/** How a change ended: done, refused because the session ended, or failed with a message to show. */
 export type ChangeResult = { ok: true } | { ok: false; reason: 'unauthorised' | 'failed' };
 
 /**
- * Run a change against the API. A rejected Admin token is routed to `onUnauthorised`
- * so the page can ask for the token; every other failure becomes a message to show inline.
+ * Run a change against the API. A session that has ended takes the page to sign-in on its own
+ * (api.ts), so `onUnauthorised` is only for a page with something to put away first; every other
+ * failure, a Viewer's refusal included, becomes a message to show inline.
  */
-export function useChange(onUnauthorised: () => void) {
+export function useChange(onUnauthorised?: () => void) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -21,7 +22,7 @@ export function useChange(onUnauthorised: () => void) {
         return { ok: true };
       } catch (thrown) {
         if (thrown instanceof UnauthorisedError) {
-          onUnauthorised();
+          onUnauthorised?.();
           return { ok: false, reason: 'unauthorised' };
         }
         setError(describeError(thrown));

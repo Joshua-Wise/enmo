@@ -25,8 +25,8 @@ describe('/api/campuses', () => {
   const listed = () => client.campuses.list();
   const addCampus = (body: unknown, init?: RequestInit) => client.campuses.add(body, init);
 
-  test('lists nothing on a fresh database, without a token', async () => {
-    const response = await fetch(url());
+  test('lists nothing on a fresh database', async () => {
+    const response = await fetch(url(), asAdmin());
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), []);
   });
@@ -51,12 +51,12 @@ describe('/api/campuses', () => {
     assert.equal((await listed()).length, 1);
   });
 
-  test('rejects an add without a token with a distinct 401', async () => {
+  test('rejects an add with no session or token with a distinct 401', async () => {
     const response = await addCampus({ name: 'Central High School', shortcode: 'CHS' }, {
       headers: { 'Content-Type': 'application/json' },
     });
     assert.equal(response.status, 401);
-    assert.deepEqual(await response.json(), { error: 'Not authorised' });
+    assert.deepEqual(await response.json(), { error: 'Sign in first' });
     assert.deepEqual(await listed(), []);
   });
 
@@ -114,7 +114,7 @@ describe('/api/campuses', () => {
       assert.deepEqual(await listed(), [
         { id, name: 'Central High School', shortcode: 'CHS' },
         { id: other.id, name: 'Maple High School', shortcode: 'MHS' },
-      ], 'the public list carries no addresses');
+      ], 'the list carries no addresses');
       assert.equal((await fetch(url('/recipients'))).status, 401);
     });
 

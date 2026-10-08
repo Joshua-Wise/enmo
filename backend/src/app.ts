@@ -5,6 +5,8 @@ import { createBroadcaster } from './sse';
 import { createIngestHealth } from './ingestHealth';
 import { createTokenRotation } from './tokenRotation';
 import { createDeviceAuth } from './deviceAuth';
+import { createAuth } from './auth';
+import { createSessions } from './sessions';
 import { createDeviceSightings } from './deviceSightings';
 import { MonotonicStore } from './monotonicStore';
 import { corsMiddleware, CorsError } from './cors';
@@ -18,6 +20,8 @@ import { csvExportsRouter } from './routes/csvExports';
 import { firmwareRouter } from './routes/firmware';
 import { notificationsRouter } from './routes/notifications';
 import { systemRouter } from './routes/system';
+import { sessionRouter } from './routes/session';
+import { usersRouter } from './routes/users';
 import { createMailer } from './mailer';
 
 /**
@@ -31,15 +35,19 @@ export const WRITE_LIMIT = 500;
 /** The Express app, without a listening socket, so tests can drive it directly. */
 export function createApp(appDeps: AppDeps): Express {
   const sightings = appDeps.sightings ?? createDeviceSightings();
+  const sse = appDeps.sse ?? createBroadcaster();
+  const sessions = createSessions({ pool: appDeps.pool, sse, now: appDeps.now });
   const deps: RouteDeps = {
     ...appDeps,
-    sse: appDeps.sse ?? createBroadcaster(),
+    sse,
     // Two Report intervals: long enough that a failure is seen by the next healthcheck, short enough to clear on its own.
     ingest: appDeps.ingest ?? createIngestHealth(2 * appDeps.config.reportIntervalSeconds * 1000),
     rotation: appDeps.rotation ?? createTokenRotation(),
     sightings,
     deviceAuth: createDeviceAuth(appDeps.config, sightings),
     mailer: appDeps.mailer ?? (appDeps.config.notifications === undefined ? undefined : createMailer(appDeps.config.notifications)),
+    sessions,
+    auth: createAuth(appDeps.config, sessions),
   };
   const app = express();
   // Naming the framework only helps someone matching it to an advisory.
@@ -86,6 +94,15 @@ export function createApp(appDeps: AppDeps): Express {
   );
 
   app.use('/api/health', healthRouter(deps));
+  app.use('/api/session', sessionRouter(deps));
+  // Everything the pages read needs a signed-in user, or the Admin token (docs/adr/0010); each change
+  // also an Admin, route by route. Readings and the firmware check take the Device token instead,
+  // and health stays open to monitors. A new route under none of these prefixes is open: add it here.
+  app.use(
+    ['/api/campuses', '/api/devices', '/api/dashboard', '/api/incidents', '/api/incidents.csv', '/api/notifications', '/api/system', '/api/users'],
+    deps.auth.signedIn,
+  );
+  app.use('/api/users', usersRouter(deps));
   app.use('/api/campuses/overview', campusOverviewRouter(deps));
   app.use('/api/campuses', campusesRouter(deps));
   // The CSV downloads sit beside the routes they export, not under them: /api/incidents.csv is not in /api/incidents.

@@ -1,6 +1,5 @@
 import express, { Router } from 'express';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { requireAdminToken } from '../auth';
 import type { RouteDeps } from '../deps';
 import { notePending } from '../pendingDevices';
 import { conditionsFor } from '../conditions';
@@ -59,11 +58,11 @@ interface StatusRow extends RowDataPacket {
  * of them is on the way to it, every Device's version, and how the named Devices of a staged release
  * are doing. POST /api/firmware publishes a signed build from the Settings page (`?only=ESP_A,ESP_B`
  * for named Devices first, each a registered Device), POST /api/firmware/widen offers a staged one to
- * every Device, and DELETE withdraws it, all with the Admin token. Publishing and widening answer
+ * every Device, and DELETE withdraws it, all as an Admin (an Admin's session or the Admin token). Publishing and widening answer
  * with the release and who it is now offered to. Each of these, and each check a board makes, tells
  * open Firmware tabs over the stream that the status can have changed (sse.ts, firmwareChanged).
  */
-export function firmwareRouter({ pool, config, sse, deviceAuth, now = () => new Date() }: RouteDeps): Router {
+export function firmwareRouter({ pool, config, sse, auth, deviceAuth, now = () => new Date() }: RouteDeps): Router {
   const router = Router();
 
   router.get('/', ...deviceAuth, async (req, res, next) => {
@@ -108,7 +107,7 @@ export function firmwareRouter({ pool, config, sse, deviceAuth, now = () => new 
     }
   });
 
-  const adminOnly = requireAdminToken(config);
+  const adminOnly = auth.admin;
   const toJson = async (release: FirmwareRelease) => ({
     ...release,
     publishedAt: release.publishedAt.toISOString(),

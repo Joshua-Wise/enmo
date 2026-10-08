@@ -1,5 +1,4 @@
 import { Router, type Request } from 'express';
-import { requireAdminToken } from '../auth';
 import { parseAcknowledgement } from '../acknowledgementInput';
 import type { RouteDeps } from '../deps';
 import { acknowledgeIncident, incidentsById, incidentsOverlapping } from '../incidentStore';
@@ -42,13 +41,13 @@ const MAX_ID = Number.MAX_SAFE_INTEGER;
  * Incident log (GET /api/incidents?from=&to=): every incident that overlaps the window, the
  * ongoing ones included, oldest first. Public, like the dashboard.
  *
- * Acknowledge (POST /api/incidents/:id/acknowledge, Admin token, `{by}`): a technician says they
+ * Acknowledge (POST /api/incidents/:id/acknowledge, an Admin, `{by}`): a technician says they
  * are on an open incident. The first acknowledgement stands; a repeat answers the incident as it
  * is. Every open dashboard hears of it on the stream.
  */
-export function incidentsRouter({ pool, config, sse, now = () => new Date() }: RouteDeps): Router {
+export function incidentsRouter({ pool, config, sse, auth, now = () => new Date() }: RouteDeps): Router {
   const router = Router();
-  const adminOnly = requireAdminToken(config);
+  const adminOnly = auth.admin;
 
   router.get('/', async (req, res, next) => {
     const window = parseWindow(req.query);

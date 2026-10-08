@@ -74,6 +74,7 @@ case "$*" in
   *"compose"*" config"*) echo "name: ta-test"; exit 0 ;;
   *"compose"*" ps "*) echo "c0ffee"; exit 0 ;;
   *"exec -T api node dist/firmwareCli.js"*) { echo "--- $*"; cat; } >> "$FAKE_DIR/fw.stdin"; cat "$FAKE_DIR/fw.out" 2>/dev/null; exit "$(cat "$FAKE_DIR/fw.rc" 2>/dev/null || echo 0)" ;;
+  *"exec -T api node dist/userCli.js"*) { echo "--- $*"; cat; } >> "$FAKE_DIR/user.stdin"; exit 0 ;;
   *"exec -T api node -e"*) cat "$FAKE_DIR/rotation.out" 2>/dev/null; exit "$(cat "$FAKE_DIR/rotation.rc" 2>/dev/null || echo 0)" ;;
   *"exec -T db sh -c"*"mysqldump"*) printf -- '-- dump\n-- Dump completed\n'; exit 0 ;;
   *"exec -T db sh -c"*) { echo "--- $*"; cat; } >> "$FAKE_DIR/db.stdin"; exit "$(cat "$FAKE_DIR/db.rc" 2>/dev/null || echo 0)" ;;
@@ -399,5 +400,21 @@ printf '%s' "$out" | grep -q '^  ESP_64533B  CHS IDF 2  version 4  Waiting for i
 rm -f "$work/fw.out"
 run_fake withdraw-firmware > /dev/null || fail "withdraw-firmware: exit $?"
 { grep -q 'firmwareCli.js status' "$work/fw.stdin" && grep -q 'firmwareCli.js withdraw' "$work/fw.stdin"; } || fail "status/withdraw: not run in api"
+
+# reset-admin-password: the password reaches api as the first line of stdin, never as an argument;
+# one under 8 characters, or a --user that is not a username, stops before api is asked.
+reset_fake; rm -f "$work/user.stdin"
+out=$(printf 'short\n' | run_fake reset-admin-password) && fail "reset-admin-password with a short password: exit 0"
+printf '%s' "$out" | grep -q 'at least 8 characters' || fail "reset-admin-password with a short password: no reason: $out"
+out=$(printf 'a-long-password\n' | run_fake reset-admin-password --user 'admin;id') && fail "reset-admin-password --user 'admin;id': exit 0"
+[ -e "$work/user.stdin" ] && fail "reset-admin-password refused: api was asked anyway"
+out=$(printf 'a-long-password\r\n' | run_fake reset-admin-password) || fail "reset-admin-password: exit $?: $out"
+[ "$(head -n 1 "$work/user.stdin")" = '--- compose exec -T api node dist/userCli.js reset-admin-password admin' ] || fail "reset-admin-password: wrong command: $(head -n 1 "$work/user.stdin")"
+[ "$(sed -n 2p "$work/user.stdin")" = 'a-long-password' ] || fail "reset-admin-password: the password did not arrive on stdin, CR dropped"
+grep -qF 'a-long-password' "$work/docker.log" && fail "reset-admin-password: the password is on a docker command line"
+printf '%s' "$out" | grep -qF 'a-long-password' && fail "reset-admin-password: the password was printed"
+rm -f "$work/user.stdin"
+printf 'a-long-password\n' | run_fake reset-admin-password --user Sam.Admin > /dev/null || fail "reset-admin-password --user Sam.Admin: exit $?"
+grep -q 'userCli.js reset-admin-password Sam.Admin$' "$work/user.stdin" || fail "reset-admin-password --user: not passed on: $(head -n 1 "$work/user.stdin")"
 
 if [ "$fails" -eq 0 ]; then echo "deploy.test.sh: all passed"; else echo "deploy.test.sh: $fails failed"; exit 1; fi

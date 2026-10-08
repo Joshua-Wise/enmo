@@ -1,6 +1,6 @@
 // axe-core over every page and state, in Chromium, Firefox and WebKit. One line per page, state and browser.
 // Point WEB at a stack with Campuses and Devices in it (the demo is ideal); it opens dialogs and forms but
-// never confirms a change. ADMIN_TOKEN unlocks the Settings states that need it.
+// never confirms a change. ADMIN_TOKEN adds a throwaway Admin, signed in for every page and deleted at the end.
 //
 //   WEB=http://localhost:8097 ADMIN_TOKEN=... node e2e/a11y.mjs [out.json]
 //
@@ -12,6 +12,7 @@
 import { chromium, firefox, webkit } from 'playwright';
 import { createRequire } from 'node:module';
 import { writeFileSync } from 'node:fs';
+import { signInContext, throwawayUser } from './session.mjs';
 
 const WEB = process.env.WEB ?? 'http://localhost:8080';
 const ADMIN = process.env.ADMIN_TOKEN;
@@ -31,11 +32,12 @@ function axeSource() {
 const AXE = axeSource();
 
 const settle = (page, ms = 1500) => page.waitForTimeout(ms);
-const withToken = async (page) => {
-  await page.evaluate((t) => localStorage.setItem('temperature-alarms.admin-token', t), ADMIN);
-};
+if (!ADMIN) { console.error('set ADMIN_TOKEN'); process.exit(2); }
+const auditor = await throwawayUser(WEB, ADMIN, 'admin', 'a11y');
+// Every API route but who is signed in answers 502, so the page behind the sign-in shows its own error.
+const apiDown = (p) => p.route((url) => url.pathname.startsWith('/api/') && url.pathname !== '/api/session', (route) => route.fulfill({ status: 502, body: 'Bad Gateway' }));
 async function firstDeviceId() {
-  const devices = await (await fetch(WEB + '/api/devices')).json();
+  const devices = await (await fetch(WEB + '/api/devices', { headers: { authorization: 'Bearer ' + ADMIN } })).json();
   return devices[0]?.id;
 }
 
@@ -58,28 +60,23 @@ const STATES = [
   {
     name: 'history, reset dialog',
     go: async (p) => {
-      await p.goto(WEB + '/');
-      await withToken(p);
       await p.goto(WEB + '/history/' + (await firstDeviceId()));
       await p.getByRole('button', { name: 'Reset history' }).click();
       await p.getByRole('alertdialog').waitFor();
     },
   },
   { name: 'history, no such Device', go: (p) => p.goto(WEB + '/history/999999') },
-  { name: 'settings, token prompt', go: (p) => p.goto(WEB + '/settings'), theme: true },
+  { name: 'sign-in', go: (p) => p.goto(WEB + '/settings'), theme: true, signedOut: true },
+  { name: 'settings, Users', go: (p) => p.goto(WEB + '/settings?tab=users') },
   {
     name: 'settings, Campuses',
     go: async (p) => {
-      await p.goto(WEB + '/');
-      await withToken(p);
       await p.goto(WEB + '/settings');
     },
   },
   {
     name: 'settings, add Campus form',
     go: async (p) => {
-      await p.goto(WEB + '/');
-      await withToken(p);
       await p.goto(WEB + '/settings');
       await p.getByRole('button', { name: 'Add campus' }).click();
       await p.getByRole('form', { name: 'Add a campus' }).waitFor();
@@ -88,8 +85,6 @@ const STATES = [
   {
     name: 'settings, delete Campus dialog',
     go: async (p) => {
-      await p.goto(WEB + '/');
-      await withToken(p);
       await p.goto(WEB + '/settings');
       await p.getByRole('button', { name: /^Delete / }).first().click();
       await p.getByRole('alertdialog').waitFor();
@@ -98,8 +93,6 @@ const STATES = [
   {
     name: 'settings, Devices',
     go: async (p) => {
-      await p.goto(WEB + '/');
-      await withToken(p);
       await p.goto(WEB + '/settings?tab=devices');
     },
     theme: true,
@@ -107,8 +100,6 @@ const STATES = [
   {
     name: 'settings, add Device form with the Campus list open',
     go: async (p) => {
-      await p.goto(WEB + '/');
-      await withToken(p);
       await p.goto(WEB + '/settings?tab=devices');
       await p.getByRole('button', { name: 'Add device' }).click();
       await p.locator('#device-campus').click();
@@ -118,8 +109,6 @@ const STATES = [
   {
     name: 'settings, edit Device form',
     go: async (p) => {
-      await p.goto(WEB + '/');
-      await withToken(p);
       await p.goto(WEB + '/settings?tab=devices');
       await p.getByRole('button', { name: /^Edit ESP_/ }).first().click();
     },
@@ -128,21 +117,21 @@ const STATES = [
   {
     name: 'error: the API is down',
     go: async (p) => {
-      await p.route('**/api/**', (route) => route.fulfill({ status: 502, body: 'Bad Gateway' }));
+      await apiDown(p);
       await p.goto(WEB + '/');
     },
   },
   {
     name: 'error: Campuses with the API down',
     go: async (p) => {
-      await p.route('**/api/**', (route) => route.fulfill({ status: 502, body: 'Bad Gateway' }));
+      await apiDown(p);
       await p.goto(WEB + '/campuses');
     },
   },
   {
     name: 'error: Incidents with the API down',
     go: async (p) => {
-      await p.route('**/api/**', (route) => route.fulfill({ status: 502, body: 'Bad Gateway' }));
+      await apiDown(p);
       await p.goto(WEB + '/incidents');
     },
   },
@@ -170,6 +159,7 @@ for (const name of BROWSERS) {
         bypassCSP: true,
         ...(process.env.SPREAD_ADDRESSES ? { extraHTTPHeaders: { 'x-forwarded-for': `10.9.${results.length >> 8}.${results.length & 255}` } } : {}),
       });
+      if (!state.signedOut) await signInContext(context, WEB, auditor);
       if (theme === 'light') await context.addInitScript(() => localStorage.setItem('vite-ui-theme', 'light'));
       const page = await context.newPage();
       const label = `${name.padEnd(8)} ${state.name}${theme === 'light' ? ' (light)' : ''}`;
@@ -207,6 +197,7 @@ for (const name of BROWSERS) {
   }
   await browser.close();
 }
+await auditor.remove();
 if (OUT) writeFileSync(OUT, JSON.stringify(results, null, 2));
 console.log(`\n${serious} serious or critical violations (or errors) across ${results.length} runs`);
 process.exit(serious === 0 ? 0 : 1);

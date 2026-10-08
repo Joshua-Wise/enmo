@@ -1,13 +1,12 @@
 import { useId, useState } from 'react';
 import { UserCheck } from 'lucide-react';
-import { acknowledgeIncident, describeError, UnauthorisedError } from '@/api';
+import { acknowledgeIncident, describeError } from '@/api';
 import { InlineError } from '@/components/settings/section';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useAdminToken } from '@/hooks/use-admin-token';
+import { useIsAdmin } from '@/hooks/use-session';
 import { ACKNOWLEDGED_BY_MAX, acknowledgedAgo, acknowledgerError, rememberName, rememberedName } from '@/lib/acknowledgement';
-import { clearAdminToken } from '@/lib/adminToken';
 import { formatTime } from '@/lib/localDate';
 import type { Acknowledgement, ConditionName, Incident } from '@/types';
 
@@ -33,11 +32,11 @@ interface AcknowledgeLineProps {
 /**
  * Who is on an incident (CONTEXT.md, Acknowledgement): "Acknowledged by Sam, 10 min ago" in grey,
  * the name in Readout White, since being on it is not a level and takes no signal colour. Until
- * someone is, a browser holding the Admin token sees a ghost "Acknowledge" that opens a small
- * field for a name or a short note; everyone else sees nothing.
+ * someone is, an Admin sees a ghost "Acknowledge" that opens a small field for a name or a short
+ * note; a Viewer sees nothing.
  */
 export function AcknowledgeLine({ incident, open, named, place, when, day = '', now, onAcknowledged }: AcknowledgeLineProps) {
-  const token = useAdminToken();
+  const admin = useIsAdmin();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -62,8 +61,8 @@ export function AcknowledgeLine({ incident, open, named, place, when, day = '', 
     );
   }
 
-  // Shown while the form is open even if the token was just refused, so the message stays to read.
-  if (!open || (token === null && !editing)) return null;
+  // Shown while the form is open even if the server just refused it, so the message stays to read.
+  if (!open || (!admin && !editing)) return null;
 
   if (!editing) {
     return (
@@ -100,13 +99,7 @@ export function AcknowledgeLine({ incident, open, named, place, when, day = '', 
       setEditing(false);
       onAcknowledged(answer);
     } catch (thrown) {
-      if (thrown instanceof UnauthorisedError) {
-        // As History does: a refused token is forgotten, and Settings asks for it again.
-        clearAdminToken();
-        setError('The Admin token was not accepted. Save it again in Settings.');
-      } else {
-        setError(describeError(thrown));
-      }
+      setError(describeError(thrown));
     } finally {
       setPending(false);
     }

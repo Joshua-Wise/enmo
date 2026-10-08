@@ -5,7 +5,6 @@ import NumberFlow from '@number-flow/react';
 import { AlertCircle, ArrowLeft, ChevronLeft, ChevronRight, Download, Info, Trash2 } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ReferenceDot, XAxis, YAxis } from 'recharts';
 import { getHistory, incidentsCsvUrl, readingsCsvUrl, resetHistory } from '@/api';
-import { AdminTokenPanel } from '@/components/AdminTokenPanel';
 import { LiveStatus } from '@/components/LiveStatus';
 import { Placeholder } from '@/components/Placeholder';
 import { NoValue, Tile } from '@/components/Tile';
@@ -28,14 +27,13 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { useAdminToken } from '@/hooks/use-admin-token';
+import { useIsAdmin } from '@/hooks/use-session';
 import { useChange } from '@/hooks/use-change';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useReadingStream } from '@/hooks/use-reading-stream';
 import { cardScope, headingScope, morphTo, readSeed, type HistorySeed } from '@/lib/card-morph';
 import { dayShift, settle } from '@/lib/motion';
 import { useResource } from '@/hooks/use-resource';
-import { clearAdminToken, getAdminToken, setAdminToken } from '@/lib/adminToken';
 import { bucketReadings, extremes, type Extreme } from '@/lib/chartBuckets';
 import { describeDay } from '@/lib/chartSummary';
 import { daysSpanned, earliestDay, rangeBounds, rangeProblem } from '@/lib/csvRange';
@@ -242,15 +240,9 @@ function DayView({ deviceId, date, seed, back, followsToday, onShowDay, onDayRol
     onReconnect: () => void reload(),
   });
 
-  // Reset needs the Admin token. A 401 opens the same prompt Settings uses: "needed" when
-  // none was stored, "rejected" when the stored one was refused (and is then forgotten).
-  const token = useAdminToken();
-  const [prompt, setPrompt] = useState<'closed' | 'needed' | 'rejected'>('closed');
-  const onUnauthorised = useCallback(() => {
-    setPrompt(getAdminToken() === null ? 'needed' : 'rejected');
-    clearAdminToken();
-  }, []);
-  const change = useChange(onUnauthorised);
+  // Reset is an Admin's: a Viewer is not offered it, and the server refuses it anyway.
+  const admin = useIsAdmin();
+  const change = useChange();
   const reset = async () => {
     if ((await change.run(() => resetHistory(deviceId))).ok) await reload();
   };
@@ -297,7 +289,7 @@ function DayView({ deviceId, date, seed, back, followsToday, onShowDay, onDayRol
           {isToday && <LiveStatus status={stream} />}
           <DownloadCsv deviceId={deviceId} closet={loaded.device.closet} campus={loaded.device.campus.name} date={loaded.date} retentionDays={loaded.retentionDays} />
           {/* Not gated on the day shown: reset is the whole history, and a junk board's Readings may all be on other days. */}
-          <ResetButton closet={loaded.device.closet} disabled={change.pending} pending={change.pending} onConfirm={() => void reset()} />
+          {admin && <ResetButton closet={loaded.device.closet} disabled={change.pending} pending={change.pending} onConfirm={() => void reset()} />}
         </div>
       }
     />
@@ -332,23 +324,6 @@ function DayView({ deviceId, date, seed, back, followsToday, onShowDay, onDayRol
       {heading}
 
       <motion.div className="space-y-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={settle}>
-        {prompt !== 'closed' && (
-          <AdminTokenPanel
-            action="Resetting a Device's history"
-            hasToken={token !== null}
-            rejected={prompt === 'rejected'}
-            onSave={(value) => {
-              setAdminToken(value);
-              setPrompt('closed');
-            }}
-            onForget={() => {
-              clearAdminToken();
-              setPrompt('closed');
-            }}
-            onClose={() => setPrompt('closed')}
-          />
-        )}
-
         {change.error && (
           <p role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
             <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden />

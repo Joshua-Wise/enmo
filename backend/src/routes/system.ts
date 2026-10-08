@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { requireAdminToken } from '../auth';
 import type { RouteDeps } from '../deps';
 import { measureDisk, systemHealth } from '../systemHealth';
 
@@ -9,14 +8,14 @@ const iso = (at: Date | null): string | null => (at === null ? null : at.toISOSt
 const processStart = (): Date => new Date(Date.now() - Math.round(process.uptime() * 1000));
 
 /**
- * GET /api/system — is the system itself OK (systemHealth.ts), behind the Admin token: what
+ * GET /api/system — is the system itself OK (systemHealth.ts), for an Admin: what
  * /api/health, /api/notifications/status and /api/firmware/status know, plus the database's size,
  * free disk, the last backup, boards with weak WiFi, and the server's uptime and version. Each line
  * carries its status; the Settings page words it. 500 when the database cannot be read at all.
  */
-export function systemRouter({ config, pool, ingest, now = () => new Date(), diskSpace = () => measureDisk(), version, startedAt = processStart() }: RouteDeps): Router {
+export function systemRouter({ config, pool, auth, ingest, now = () => new Date(), diskSpace = () => measureDisk(), version, startedAt = processStart() }: RouteDeps): Router {
   const router = Router();
-  router.get('/', requireAdminToken(config), async (_req, res, next) => {
+  router.get('/', auth.admin, async (_req, res, next) => {
     try {
       const health = await systemHealth({
         pool,

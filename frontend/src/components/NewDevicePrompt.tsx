@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { getPendingDevices, setPendingIgnored } from '@/api';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { useAdminToken } from '@/hooks/use-admin-token';
+import { useIsAdmin } from '@/hooks/use-session';
 import { boardsToAnnounce, promptKey } from '@/lib/newDevices';
 import type { PendingDevice } from '@/types';
 
-/** How often a page with the Admin token asks whether a new board has turned up. */
+/** How often an Admin's page asks whether a new board has turned up. */
 const POLL_MS = 30_000;
 const STORAGE_KEY = 'temperature-alarms:new-devices-seen';
 
@@ -28,17 +28,17 @@ const saveDismissed = (keys: Set<string>) => {
 
 /**
  * A pop-up, on any page, when a board starts reporting with the Device token without being added:
- * adopt it in Settings, or say not now (it stays listed under New devices). Only for someone holding
- * the Admin token, since only they can see the list and adopt.
+ * adopt it in Settings, or say not now (it stays listed under New devices). Only for an Admin, since
+ * only they can see the list and adopt.
  */
 export function NewDevicePrompt() {
-  const token = useAdminToken();
+  const admin = useIsAdmin();
   const navigate = useNavigate();
   const [waiting, setWaiting] = useState<PendingDevice[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed);
 
   useEffect(() => {
-    if (token === null) {
+    if (!admin) {
       setWaiting([]);
       return;
     }
@@ -49,7 +49,7 @@ export function NewDevicePrompt() {
           if (!cancelled) setWaiting(pending);
         },
         () => {
-          // A refused token or a dropped connection: Settings says so; the pop-up just stays quiet.
+          // A dropped connection: Settings says so; the pop-up just stays quiet.
         },
       );
     void check();
@@ -58,7 +58,7 @@ export function NewDevicePrompt() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [token]);
+  }, [admin]);
 
   const announce = boardsToAnnounce(waiting, dismissed);
   const wave = (boards: PendingDevice[]) => {

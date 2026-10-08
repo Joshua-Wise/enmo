@@ -7,7 +7,7 @@ const timeOf = (iso: string): string => new Date(iso).toLocaleString([], { dateS
 
 /**
  * During a Device token rotation, the Devices still to reflash (docs/adr/0003). Shown only to
- * someone holding the Admin token, and only while the server still accepts the previous token.
+ * an Admin, and only while the server still accepts the previous token.
  */
 export function RotationLine() {
   const { state } = useResource(getDeviceRotation);

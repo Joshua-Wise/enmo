@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { createTestPool, resetDatabase } from './helpers/database';
 import { startServer, testConfig, type RunningServer } from './helpers/server';
-import { api, errorOf, json, type Campus, type Condition, type Reading } from './helpers/api';
+import { api, asAdmin, errorOf, json, type Campus, type Condition, type Reading } from './helpers/api';
 import { insertIncident } from '../src/incidentStore';
 import { PAST_DAYS_CACHE_MS, selectDayMaxima } from '../src/routes/campusOverview';
 import { localDay, type LocalDay } from '../src/localDay';
@@ -83,7 +83,7 @@ describe('GET /api/campuses/overview', () => {
   const overviewAt = async (now: Date, query = ''): Promise<Response> => {
     await server?.close();
     server = await startServer(pool, testConfig(), { now: () => now });
-    return fetch(`${server.url}/api/campuses/overview${query}`);
+    return fetch(`${server.url}/api/campuses/overview${query}`, asAdmin());
   };
   const overview = async (now = NOW, query = '?tz=America/Chicago'): Promise<Overview> => {
     const response = await overviewAt(now, query);
@@ -117,7 +117,7 @@ describe('GET /api/campuses/overview', () => {
     return found;
   };
 
-  test('needs no token, names the Hot warning threshold and the retention window the server uses, and refuses an unknown zone (422)', async () => {
+  test('names the Hot warning threshold and the retention window the server uses, and refuses an unknown zone (422)', async () => {
     const response = await overviewAt(NOW);
     assert.equal(response.status, 200);
     const body = await json<Overview>(response);
@@ -265,7 +265,7 @@ describe('GET /api/campuses/overview', () => {
     await readingAt(d.id, secondsAgo(60), 75);
     let clock = NOW;
     server = await startServer(pool, testConfig(), { now: () => clock });
-    const get = async () => (await json<Overview>(await fetch(`${server!.url}/api/campuses/overview?tz=America/Chicago`))).campuses[0].days;
+    const get = async () => (await json<Overview>(await fetch(`${server!.url}/api/campuses/overview?tz=America/Chicago`, asAdmin()))).campuses[0].days;
     const highOn = (days: OverviewDay[], date: string) => days.find((day) => day.date === date)?.maxTempF;
 
     assert.equal(highOn(await get(), '2026-10-01'), 74);
@@ -367,7 +367,7 @@ describe('GET /api/campuses/overview', () => {
       },
     });
     server = await startServer(counting, testConfig(), { now: () => NOW });
-    const responses = await Promise.all(Array.from({ length: 5 }, () => fetch(`${server!.url}/api/campuses/overview?tz=America/Chicago`)));
+    const responses = await Promise.all(Array.from({ length: 5 }, () => fetch(`${server!.url}/api/campuses/overview?tz=America/Chicago`, asAdmin())));
     for (const response of responses) assert.equal(response.status, 200);
     assert.equal(pastReads, 1);
   });
@@ -378,7 +378,7 @@ describe('GET /api/campuses/overview', () => {
     await readingAt(d.id, new Date('2026-10-01T17:00:00Z'), 74);
     let clock = new Date(NOW.getTime() + 2 * 3_600_000);
     server = await startServer(pool, testConfig(), { now: () => clock });
-    const get = async () => (await json<Overview>(await fetch(`${server!.url}/api/campuses/overview?tz=America/Chicago`))).campuses[0].days;
+    const get = async () => (await json<Overview>(await fetch(`${server!.url}/api/campuses/overview?tz=America/Chicago`, asAdmin()))).campuses[0].days;
     assert.equal((await get()).find((day) => day.date === '2026-10-01')?.maxTempF, 74);
     await readingAt(d.id, new Date('2026-10-01T18:00:00Z'), 81);
     clock = NOW;

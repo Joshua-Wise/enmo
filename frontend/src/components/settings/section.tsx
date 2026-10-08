@@ -209,7 +209,7 @@ export function DeleteButton({ label, title, description, disabled, error, onCon
           size="icon-sm"
           disabled={disabled}
           aria-label={label}
-          title={disabled ? 'Enter the Admin token to delete' : label}
+          title={label}
           className="text-destructive hover:text-destructive"
         >
           <Trash2 aria-hidden />

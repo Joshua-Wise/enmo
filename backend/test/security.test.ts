@@ -155,7 +155,7 @@ describe('security', () => {
       const device = await client.devices.create(campus.id);
       for (const payload of injections) {
         const q = encodeURIComponent(payload);
-        const dashboard = await fetch(client.dashboard.url(`?campus=${q}`));
+        const dashboard = await fetch(client.dashboard.url(`?campus=${q}`), asAdmin());
         assert.equal(dashboard.status, 200, payload);
         assert.equal((await json<Dashboard>(dashboard)).devices.length, 0, payload);
 
@@ -166,12 +166,12 @@ describe('security', () => {
           `${server.url}/api/devices/${device.id}/history?date=${q}`,
           `${server.url}/api/devices/${device.id}/history?tz=${q}`,
         ]) {
-          const response = await fetch(url);
+          const response = await fetch(url, asAdmin());
           assert.equal(response.status, 422, `${url}`);
           await response.arrayBuffer();
         }
         for (const url of [`${server.url}/api/devices/${q}/history`, `${server.url}/api/devices/${q}`]) {
-          const response = await fetch(url, url.endsWith('/history') ? {} : { ...asAdmin(), method: 'DELETE' });
+          const response = await fetch(url, url.endsWith('/history') ? asAdmin() : { ...asAdmin(), method: 'DELETE' });
           assert.equal(response.status, 404, url);
           await response.arrayBuffer();
         }
@@ -199,7 +199,7 @@ describe('security', () => {
       const devices = await client.devices.list();
       assert.equal(devices.length, names.length);
       // The API answers JSON, never HTML a browser would render.
-      const response = await fetch(client.campuses.url());
+      const response = await fetch(client.campuses.url(), asAdmin());
       assert.match(response.headers.get('content-type') ?? '', /^application\/json/);
       await response.arrayBuffer();
     });
@@ -231,7 +231,7 @@ describe('security', () => {
         console.error = () => {};
         let response: Response;
         try {
-          response = await fetch(`${broken.url}/api/campuses`);
+          response = await fetch(`${broken.url}/api/campuses`, asAdmin());
         } finally {
           console.error = original;
         }

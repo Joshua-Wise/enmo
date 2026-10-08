@@ -8,6 +8,8 @@ import type { TokenRotation } from './tokenRotation';
 import type { DeviceSightings } from './deviceSightings';
 import type { Mailer } from './mailer';
 import type { DiskSpace } from './systemHealth';
+import type { Auth } from './auth';
+import type { Sessions } from './sessions';
 
 /** What every route module and background job is handed at startup. */
 export interface AppDeps {
@@ -50,4 +52,8 @@ export interface RouteDeps extends AppDeps {
   mailer: Mailer | undefined;
   /** The Device token check and its wrong-token limit, shared by every route a Device calls (deviceAuth.ts). */
   deviceAuth: RequestHandler[];
+  /** Signed-in users' sessions (sessions.ts). */
+  sessions: Sessions;
+  /** The guards for everything else: a session or the Admin token, an Admin's for changes (auth.ts). */
+  auth: Auth;
 }

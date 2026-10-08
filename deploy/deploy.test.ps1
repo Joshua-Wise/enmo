@@ -55,7 +55,7 @@ finally { Remove-Item -LiteralPath $EnvPath -ErrorAction SilentlyContinue }
 # and answers what the action asks. Nothing reaches a real daemon.
 $work = Join-Path ([System.IO.Path]::GetTempPath()) "deploy-test-$PID"
 New-Item -ItemType Directory -Path $work -Force | Out-Null
-$fake = @{ Log = @(); DbStdin = @(); FwStdin = @(); FwRc = 0; RotationOut = @(); RotationRc = 0; DbRc = 0; Volume = $false; RealBackup = $false; Built = @() }
+$fake = @{ Log = @(); DbStdin = @(); FwStdin = @(); UserStdin = @(); FwRc = 0; RotationOut = @(); RotationRc = 0; DbRc = 0; Volume = $false; RealBackup = $false; Built = @() }
 $run = {
     param([string[]]$Arguments)
     $script:ast = $ast
@@ -75,6 +75,7 @@ $run = {
         if ($line -like 'exec -T db sh -c*mysqldump*') { return }
         if ($line -like 'cp db:*') { Set-Content -LiteralPath $args[2] -Value '-- Dump completed'; return }
         if ($line -like 'exec -T api node dist/firmwareCli.js*') { $fake.FwStdin += @($input | ForEach-Object { "$_" }); $global:LASTEXITCODE = $fake.FwRc; return }
+        if ($line -like 'exec -T api node dist/userCli.js*') { $fake.UserStdin += @($input | ForEach-Object { "$_" }); return }
         if ($line -like 'exec -T api node -e*') { $fake.RotationOut; $global:LASTEXITCODE = $fake.RotationRc; return }
         if ($line -like 'exec -T db sh -c*') { $fake.DbStdin += @($input | ForEach-Object { "$_" }); $global:LASTEXITCODE = $fake.DbRc; return }
     }
@@ -380,6 +381,21 @@ try {
     $fake.FwRc = 0
     Expect (Invoke-Fake @('firmware-status')) $true 'firmware-status failed'
     Expect (Invoke-Fake @('withdraw-firmware')) $true 'withdraw-firmware failed'
+
+    # reset-admin-password: the password reaches api as the first line of stdin, never as an argument;
+    # one under 8 characters, or a --user that is not a username, stops before api is asked.
+    $fake.UserStdin = @()
+    Expect (Invoke-FakeStdin "short`n" @('reset-admin-password')) $false 'reset-admin-password with a short password: succeeded'
+    Expect ((& $said) -match 'at least 8 characters') $true 'reset-admin-password with a short password: no reason'
+    Expect (Invoke-FakeStdin "a-long-password`n" @('reset-admin-password', '--user', 'admin;id')) $false "reset-admin-password --user 'admin;id': succeeded"
+    Expect ($fake.UserStdin.Count -eq 0) $true 'reset-admin-password refused: api was asked anyway'
+    Expect (Invoke-FakeStdin "a-long-password`r`n" @('reset-admin-password')) $true "reset-admin-password failed: $(& $said)"
+    Expect (@($fake.Log | Where-Object { $_ -eq 'exec -T api node dist/userCli.js reset-admin-password admin' }).Count -eq 1) $true 'reset-admin-password: wrong command'
+    Expect (($fake.UserStdin -join '|') -ceq 'a-long-password') $true "reset-admin-password: the password did not arrive on stdin, CR dropped: $($fake.UserStdin.Count) lines"
+    Expect (@($fake.Log | Where-Object { $_ -match 'a-long-password' }).Count -eq 0) $true 'reset-admin-password: the password is on a docker command line'
+    Expect ((& $said) -match 'a-long-password') $false 'reset-admin-password: the password was printed'
+    Expect (Invoke-FakeStdin "a-long-password`n" @('reset-admin-password', '--user', 'Sam.Admin')) $true 'reset-admin-password --user Sam.Admin failed'
+    Expect (@($fake.Log | Where-Object { $_ -eq 'exec -T api node dist/userCli.js reset-admin-password Sam.Admin' }).Count -eq 1) $true 'reset-admin-password --user: not passed on'
 }
 finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue

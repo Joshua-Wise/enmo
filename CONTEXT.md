@@ -43,8 +43,24 @@ _Avoid_: Location, room, position
 **IDF / MDF**:
 Intermediate and Main Distribution Frame. The two kinds of Closet; parsed from the Closet name to tag cards.
 
+**User**:
+A person who signs in to the site with a username and password; nothing on the site or its API shows without signing in. Each is an Admin or a Viewer, and can be disabled. A fresh install has one, `admin` with the password `admin`, which must be changed at its first sign-in (docs/adr/0010).
+_Avoid_: Account, login, member
+
+**Admin**:
+A User who may change things: Campuses, Devices, firmware, history, Acknowledgements, and other Users on Settings. There is always at least one enabled Admin.
+_Avoid_: Administrator, superuser, owner
+
+**Viewer**:
+A User who may look at every page but change nothing; Settings shows them no change controls.
+_Avoid_: Read-only user, guest
+
+**Session**:
+What a signed-in browser holds: it ends on Sign out, after 12 hours unused, after 7 days at most, or at once when its User is disabled, deleted, or given a new password by an Admin.
+_Avoid_: Login, token (that is the Admin or Device token)
+
 **Admin token**:
-The single shared secret that authorises changes to Devices, Campuses, and history.
+The single shared secret scripts use in place of signing in (the bench watcher, `deploy.sh`, the demo, the end-to-end walk): it may do whatever an Admin may. People sign in instead.
 
 **Device token**:
 The single shared secret every Device sends with each Reading.
@@ -74,7 +90,7 @@ A stretch of time a Device spent in one Condition at warning or worse, recorded 
 _Avoid_: Alert, alarm, event, outage
 
 **Acknowledgement**:
-A technician saying they are on an open Incident, with their name or a short note (free text, 1 to 60 characters, since there are no user accounts) and when they said it. Given in the app with the Admin token, from the Device card or the Incidents log; the first one stands, an ended Incident cannot be acknowledged, and it is never cleared, not by the level rising nor by the close. It shows on the card, in the log, and in every later Notification about that Incident, which still sends (docs/adr/0008). It stops Reminders.
+A technician saying they are on an open Incident, with their name or a short note (free text, 1 to 60 characters) and when they said it. Given in the app by an Admin, from the Device card or the Incidents log; the first one stands, an ended Incident cannot be acknowledged, and it is never cleared, not by the level rising nor by the close. It shows on the card, in the log, and in every later Notification about that Incident, which still sends (docs/adr/0008). It stops Reminders.
 _Avoid_: Claim, assign, ownership, ack
 
 **Notification**:
@@ -98,8 +114,8 @@ The holding Campus (shortcode `BENCH`) a Device is registered under between flas
 _Avoid_: Staging, spare, inventory (that is the spreadsheet of boards, not a place)
 
 **Operator**:
-The person who runs the backend and its database: installs, upgrades, backs up. A role in the documentation, not in the product; there is no login for it.
-_Avoid_: Admin (that is a token), sysadmin, host
+The person who runs the backend and its database: installs, upgrades, backs up. A role in the documentation, not in the product; their way back in when no Admin can sign in is `deploy.sh reset-admin-password`.
+_Avoid_: Admin (that is a User's role), sysadmin, host
 
 **Retention window**:
 How long a Reading is kept before the backend deletes it, in a pass that runs once a day and whenever the backend starts. 90 days unless the configuration says otherwise (docs/adr/0004). Nothing is rolled up first; a Reading past the window is gone.

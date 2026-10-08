@@ -12,7 +12,7 @@ import { FieldHint, InlineError, InlineForm } from './section';
 interface EditDeviceFormProps {
   device: Device;
   campuses: Campus[];
-  /** False while no Admin token is stored; the change is disabled and the token panel explains why. */
+  /** True for an Admin, the only one who can save it. */
   canEdit: boolean;
   /** Saved: the Device as it now is, which is the same Device when nothing was changed. */
   onSaved: (updated: Device) => Promise<void>;

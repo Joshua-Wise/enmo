@@ -151,14 +151,14 @@ export const json = async <T>(response: Response): Promise<T> => (await response
 
 export const errorOf = async (response: Response): Promise<string> => (await json<{ error: string }>(response)).error;
 
-/** The API as the tests drive it: every call goes over HTTP against the running server. */
+/** The API as the tests drive it: every call goes over HTTP against the running server, reads with the Admin token (docs/adr/0010). */
 export function api(server: RunningServer) {
   const post = (path: string, body: unknown, init: RequestInit = asAdmin()) =>
     fetch(`${server.url}${path}`, { ...init, method: 'POST', body: JSON.stringify(body) });
   return {
     campuses: {
       url: (path = '') => `${server.url}/api/campuses${path}`,
-      list: async () => json<Campus[]>(await fetch(`${server.url}/api/campuses`)),
+      list: async () => json<Campus[]>(await fetch(`${server.url}/api/campuses`, asAdmin())),
       add: (body: unknown, init?: RequestInit) => post('/api/campuses', body, init),
       /** Adds a campus that is expected to succeed and returns it. */
       create: async (name = 'Central High School', shortcode = 'CHS') =>
@@ -168,7 +168,7 @@ export function api(server: RunningServer) {
       url: (path = '') => `${server.url}/api/devices${path}`,
       /** The Device list without its token-mismatch hint (deviceAdoption.test.ts reads that directly). */
       list: async () =>
-        (await json<Array<Device & { tokenMismatchAt?: string | null }>>(await fetch(`${server.url}/api/devices`))).map(({ tokenMismatchAt: _hint, ...device }) => device),
+        (await json<Array<Device & { tokenMismatchAt?: string | null }>>(await fetch(`${server.url}/api/devices`, asAdmin()))).map(({ tokenMismatchAt: _hint, ...device }) => device),
       add: (body: unknown, init?: RequestInit) => post('/api/devices', body, init),
       /** Changes a Device's closet or campus, as the admin unless init says otherwise. */
       edit: (id: number, body: unknown, init: RequestInit = asAdmin()) =>
@@ -177,7 +177,7 @@ export function api(server: RunningServer) {
       create: async (campusId: number, hostname = 'ESP_A1B2C3', closet = 'IDF 2') =>
         json<Device>(await post('/api/devices', { hostname, campusId, closet })),
       /** One day of a Device's history. `query` is appended verbatim, e.g. `?date=2026-09-05&tz=America/Chicago`. */
-      history: (id: number, query = '') => fetch(`${server.url}/api/devices/${id}/history${query}`),
+      history: (id: number, query = '') => fetch(`${server.url}/api/devices/${id}/history${query}`, asAdmin()),
       /** Deletes every Reading the Device has, as the admin unless init says otherwise. */
       resetHistory: (id: number, init: RequestInit = asAdmin()) =>
         fetch(`${server.url}/api/devices/${id}/history`, { ...init, method: 'DELETE' }),
@@ -189,10 +189,10 @@ export function api(server: RunningServer) {
     },
     incidents: {
       /** The raw response for a window, `query` appended verbatim, e.g. `?from=...&to=...`. */
-      fetch: (query = '') => fetch(`${server.url}/api/incidents${query}`),
+      fetch: (query = '') => fetch(`${server.url}/api/incidents${query}`, asAdmin()),
       /** The incidents overlapping [from, to), expected to succeed. */
       list: async (from: Date, to: Date) => {
-        const response = await fetch(`${server.url}/api/incidents?from=${from.toISOString()}&to=${to.toISOString()}`);
+        const response = await fetch(`${server.url}/api/incidents?from=${from.toISOString()}&to=${to.toISOString()}`, asAdmin());
         if (response.status !== 200) throw new Error(`GET /api/incidents: ${response.status} ${await response.text()}`);
         return json<IncidentLog>(response);
       },
@@ -204,7 +204,7 @@ export function api(server: RunningServer) {
       /** The dashboard, optionally filtered by campus shortcode. */
       get: async (campus?: string) => {
         const query = campus === undefined ? '' : `?campus=${encodeURIComponent(campus)}`;
-        return json<Dashboard>(await fetch(`${server.url}/api/dashboard${query}`));
+        return json<Dashboard>(await fetch(`${server.url}/api/dashboard${query}`, asAdmin()));
       },
     },
   };

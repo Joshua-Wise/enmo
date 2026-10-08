@@ -380,7 +380,8 @@ class Server:
         return self._bench_campus_id
 
     def _find_bench_campus(self) -> int:
-        status, campuses = self._send("GET", "/api/campuses")
+        # Reads need a session or the Admin token too (docs/adr/0010).
+        status, campuses = self._admin("GET", "/api/campuses")
         if status != 200:
             raise BenchError(f"GET /api/campuses answered {status}: {campuses}")
         for campus in campuses:

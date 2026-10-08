@@ -17,6 +17,7 @@ import { monthlyReportSchema } from './0017-monthly-report';
 import { systemHealthSchema } from './0018-system-health';
 import { quietHoursSchema } from './0019-quiet-hours';
 import { deviceNetworkSchema } from './0020-device-network';
+import { usersSchema } from './0021-users';
 
 /** What a migration may consult and report to while it runs. */
 export interface MigrationContext {
@@ -50,6 +51,7 @@ export const migrations: Migration[] = [
   systemHealthSchema,
   quietHoursSchema,
   deviceNetworkSchema,
+  usersSchema,
 ];
 
 /** The context the running backend hands its migrations: logging to stdout. */
