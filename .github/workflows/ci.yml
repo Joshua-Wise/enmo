@@ -237,12 +237,14 @@ jobs:
             context: backend
           - image: frontend
             context: frontend
-    env:
-      IMAGE: ghcr.io/hamzaqaz/temperature-alarms-react-${{ matrix.image }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      # Named after the repository it is built in, lowercased as the registry requires:
+      # ghcr.io/<owner>/<repo>-api and -frontend.
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}-${{ matrix.image }}" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v4
       - name: Log in to ghcr.io
         if: env.PUBLISH == 'true'
@@ -256,6 +258,8 @@ jobs:
         with:
           context: ${{ matrix.context }}
           push: ${{ env.PUBLISH == 'true' }}
+          # The commit, for Settings, System (the api reads it; the frontend ignores it).
+          build-args: APP_VERSION=${{ github.sha }}
           tags: |
             ${{ env.IMAGE }}:${{ github.sha }}
             ${{ env.IMAGE }}:latest

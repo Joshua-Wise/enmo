@@ -76,7 +76,6 @@ services:
       COLD_WARNING_F: ${COLD_WARNING_F:-50}
       DRY_WARNING_PERCENT: ${DRY_WARNING_PERCENT:-20}
       MISSED_REPORTS_BEFORE_OFFLINE: ${MISSED_REPORTS_BEFORE_OFFLINE:-3}
-      LEGACY_TIME_ZONE: ${LEGACY_TIME_ZONE:-}
       # The api's zone: quiet hours, the times in emails, and the monthly report's months. UTC unless
       # set; spelled out, since an empty TZ is not UTC to every library.
       TZ: ${TZ:-UTC}

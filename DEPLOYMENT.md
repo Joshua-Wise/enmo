@@ -42,7 +42,6 @@ The two scripts are the same tool, with the same actions and the same flags; `--
 | `backup` | `mysqldump` through the `db` container to `backups/<project>_<date>-<time>.sql.gz`, checked for completeness, then records its time, name, and size in the database (`last_backup`) for Settings, System, which cannot see cron or `backups/` (a warning, and the backup kept, if the api is from before that table). `--keep-days N` then deletes this project's backups older than N days |
 | `schedule-backup`, `unschedule-backup` | Adds a line to your crontab that runs `backup --keep-days 7` every night at 02:00 (`--at HH:MM`, `--keep-days N`), logging to `backups/backup.log`; or removes it. Repeating `schedule-backup` replaces its own line, found by a `# temperature-alarms backup: <checkout>` comment, and other crontab lines are never touched. Linux and macOS; in Git Bash or `deploy.ps1` on Windows it prints the `schtasks` command for Task Scheduler instead |
 | `restore` | Replaces the whole database with a backup (`--file`, or pick from a list): it empties the database first, so a table the backup lacks does not survive it, and the api's migrations recreate any newer table, empty. Asks you to type the project name, and backs up the current database first, recording that backup again once the api is back |
-| `migrate-legacy` | Backs up, then runs `npm run migrate:legacy` in `api` (see [Migrating an old database in](#migrating-an-old-database-in)) |
 | `info` | The dashboard URL, the four secrets (and `DEVICE_TOKEN_PREVIOUS` during a rotation) masked (`--reveal` to print them), the email relay and recipients (or `off`) with the SMTP login, its password masked whole, and the two `config.h` lines for the firmware |
 | `rotate-device-token` | Starts a Device token rotation: the current token becomes `DEVICE_TOKEN_PREVIOUS`, still accepted, a new `DEVICE_TOKEN` is generated, `api` restarts with both, and the new `config.h` line is printed (masked unless `--reveal`). `--finish` ends it once Settings lists no Device on the previous token, and refuses otherwise; `--finish --force` ends it anyway, behind the typed project name ([Rotating the Device token](#rotating-the-device-token)) |
 | `publish-firmware`, `firmware-status`, `withdraw-firmware` | Over-the-air firmware (ADR 0007; README, "Updating boards over the air"). `publish-firmware --file TemperatureAlarms.ino.bin.signed` offers a signed build to every Device, or with `--only ESP_A,ESP_B` to those first, each a registered Device (`ESP-A1B2C3` from a board's log is read as `ESP_A1B2C3`; the same file again without `--only` then widens it, refused while it is held); the image goes into `api` on stdin and is checked there (signed, with a version above the published one), and the answer says who it is offered to. `firmware-status` shows the build on offer, whether it is held and why, a line for each Device it is offered to with where it is on the way (waiting for its next check and when, downloading, running it with its clean Readings, or stuck: Offline, refused the image, never checked in), and the version each Device runs; `withdraw-firmware` stops offering it. The Settings page's Firmware tab does the same from a browser |
@@ -153,7 +152,7 @@ Set the four secrets; `docker compose up` refuses to start and names any that is
 | `DB_PASSWORD` | The password of the database user `api` connects as. Generate a third one; nothing outside the stack can reach the database |
 | `DB_ROOT_PASSWORD` | The password of MySQL root, which logs in only inside the `db` container, for backups and restores. Generate a fourth one. Only `db` gets it, never `api`, so a bug in `api` cannot become MySQL root. MySQL takes it when the volume is first created; changing it later is the procedure in [Separate MySQL root password](#separate-mysql-root-password) |
 
-`WEB_PORT` is the only port published; leave it at 80 so boards and browsers need no port in their URL. `TRUST_PROXY` stays empty unless a TLS proxy sits in front of the stack ([TLS in front of the stack](#tls-in-front-of-the-stack)). Every other setting in `.env.example` is the backend's and has the default shown; set `LEGACY_TIME_ZONE` only when [migrating an old database in](#migrating-an-old-database-in). `TZ` is `api`'s time zone, an IANA name like `America/Chicago`: quiet hours, the times written in emails, and the monthly report's months are read in it. Left empty it is UTC, the container's own, as before it existed; set it with `install --reconfigure --yes --set TZ=America/Chicago`, then `deploy --yes`. `api` refuses to start on a zone Node does not know, naming it, rather than quietly running in UTC. The `SMTP_*`, `NOTIFY_*`, and `PUBLIC_URL` lines stay commented until you turn on [email notifications](#email-notifications). `.env` is gitignored.
+`WEB_PORT` is the only port published; leave it at 80 so boards and browsers need no port in their URL. `TRUST_PROXY` stays empty unless a TLS proxy sits in front of the stack ([TLS in front of the stack](#tls-in-front-of-the-stack)). Every other setting in `.env.example` is the backend's and has the default shown. `TZ` is `api`'s time zone, an IANA name like `America/Chicago`: quiet hours, the times written in emails, and the monthly report's months are read in it. Left empty it is UTC, the container's own, as before it existed; set it with `install --reconfigure --yes --set TZ=America/Chicago`, then `deploy --yes`. `api` refuses to start on a zone Node does not know, naming it, rather than quietly running in UTC. The `SMTP_*`, `NOTIFY_*`, and `PUBLIC_URL` lines stay commented until you turn on [email notifications](#email-notifications). `.env` is gitignored.
 
 ### First run
 
@@ -161,8 +160,6 @@ Set the four secrets; `docker compose up` refuses to start and names any that is
 docker compose up -d --build
 docker compose ps        # wait until db, api, and web all say "healthy"
 ```
-
-Migrating an old database? Stop here, before the first start, and go to [Migrating an old database in](#migrating-an-old-database-in): it needs an empty volume.
 
 The first build downloads the base images and compiles both packages, a couple of minutes; later builds reuse the layers. On start, `api` waits for `db` to answer, creates or upgrades the schema itself through its migration runner, and `web` starts once `api` answers `/api/health`. Then open `http://<host>/` (with `:WEB_PORT` only if you changed it).
 
@@ -190,7 +187,7 @@ Reset history on the Device's History page removes every Reading of the Device, 
 Useful commands:
 
 ```bash
-docker compose logs -f api        # migrations, retention, legacy: lines
+docker compose logs -f api        # migrations, retention
 docker compose logs -f web        # nginx access and error log
 docker compose restart api
 docker compose down               # stop; the data stays on the volume
@@ -216,7 +213,7 @@ An upgrade that adds an index to `readings` takes `api` off the air while it bui
 docker compose exec db sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot temperature_alarms -e "ALTER TABLE readings ADD INDEX ix_readings_device_recorded_temp (device_id, recorded_at, id, temp_f), DROP INDEX ix_readings_device_recorded, ALGORITHM=INPLACE, LOCK=NONE"'
 ```
 
-The migration runner holds a MySQL lock while it works, so a second runner, such as `npm run migrate:legacy` started while `api` is still converting a large old database, waits for the first to finish. After ten minutes it gives up with `Another migration run still holds the lock`; run it again once the first has finished.
+The migration runner holds a MySQL lock while it works, so a second runner, such as a second `api` started while the first is still applying a long migration, waits for the first to finish. After ten minutes it gives up with `Another migration run still holds the lock`; run it again once the first has finished.
 
 ### Separate MySQL root password
 
@@ -297,38 +294,6 @@ What to plan for, measured with 100 Devices posting every 30 seconds and 90 days
 | Restore of that backup | about 4.5 minutes, the api down throughout | proportionally longer |
 
 Readings keep arriving for the first 90 days and then level off, since the retention job removes what is older.
-
-### Migrating an old database in
-
-A database from the PHP era or the first Node backend holds `devices`, `locations`, `alarms`, and one `ESP_xxxxxx` table per Device with the date and time as strings. The backend converts it on its first start (see [Upgrading a database from the old per-Device tables](#upgrading-a-database-from-the-old-per-device-tables) for what that does and how to verify it). With the stack, the order is: restore the old dump into an empty volume first, then let `api` start against it. The conversion runs only on the first start against a database: once `api` has started on an empty volume, its new tables are in place and every migration is recorded as done, so a dump restored over them is never converted and leaves `api` reading legacy tables it cannot use.
-
-0. If the stack has run on this server before (a First run, or the deploy script's `deploy`), start from an empty database. This deletes everything in it, so back it up first if anything there matters:
-
-   ```bash
-   docker compose down -v
-   ```
-
-1. Dump the old database on the old server: `mysqldump temperature_alarms > old.sql`.
-2. In `.env`, set `LEGACY_TIME_ZONE=America/Chicago`, the zone the old writer used. The container's own zone is UTC unless `TZ` names another, so the default would otherwise parse every old timestamp six hours wrong. (`deploy/deploy.sh install --yes --set LEGACY_TIME_ZONE=America/Chicago` writes a new `.env` with it; when `.env` already exists, add `--reconfigure`, which sets that one line and keeps the secrets.)
-3. Start only the database and restore into it:
-
-   ```bash
-   docker compose up -d --wait db
-   docker compose exec -T db sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot temperature_alarms' < old.sql
-   ```
-
-4. Start the rest: `docker compose up -d --build` (or `deploy/deploy.sh deploy`). The first start of `api` renames the old tables, builds the new ones, and copies every row; watch `docker compose logs api` for lines starting `legacy:`, each naming a row it could not read and skipped. `api` starts listening only once the copy is done. A database that takes longer than about a minute outlasts the healthcheck, so `up` reports `api` unhealthy and leaves `web` stopped. That is harmless: wait for `Server is running on port 3001` in `docker compose logs api`, then run the same command again.
-5. If an old writer keeps adding rows to an `ESP_` table after that (a board not yet reflashed, still posting to the old PHP endpoint), run the legacy migrations again; each run copies only rows added since. `deploy/deploy.sh migrate-legacy` backs up first and runs the same command:
-
-   ```bash
-   docker compose exec api npm run migrate:legacy
-   ```
-
-6. Verify the counts with the SQL in the section linked above, then drop the legacy tables by hand. Open the MySQL prompt with:
-
-   ```bash
-   docker compose exec db sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot temperature_alarms'
-   ```
 
 ### TLS in front of the stack
 
@@ -479,46 +444,6 @@ What it needs from you:
 - **Run `arduino\bench.py` with `--server https://YOUR_DOMAIN`** once TLS is in front: it sends the Admin token with every registration, and it refuses to follow the proxy's redirect from `http://`.
 - Run every upgrade through `deploy.sh deploy` or with `docker compose build --pull` first, so the base images pick up their security patches.
 
-## Upgrading a database from the old per-Device tables
-
-Both paths share this. The first start of the new backend against an old database (see ADR 0002):
-
-1. renames `devices` and `locations` to `legacy_devices` and `legacy_locations`, then builds the new `campuses`, `devices`, and `readings` tables;
-2. copies each legacy location into `campuses` and each legacy device into `devices`, matching the old free-text `Campus` column against a shortcode first and a name second;
-3. copies every row of every `ESP_xxxxxx` table into `readings`, parsing the string date and time in `LEGACY_TIME_ZONE`, which defaults to the server's own zone. The PHP writer pinned America/Chicago, so set `LEGACY_TIME_ZONE=America/Chicago` in `.env` if the server (or the container, which is UTC unless `TZ` is set) is not on Central time.
-
-Nothing legacy is dropped. Every row that cannot be read (an unparseable date or time, a device whose campus is unknown, a table with no device row) is logged with its table and id and skipped, so watch the backend log for lines starting `legacy:` on that first start. The runner applies each migration once; `npm run migrate:legacy` from `backend/` (or through `docker compose exec api`) runs the legacy migrations again by hand. It is safe to repeat: each `ESP_` table's progress is kept in `legacy_readings_progress`, so a later run copies nothing twice and picks up only rows added since.
-
-Before dropping anything, verify the numbers. For each Device, the legacy row count should equal the copied count plus the skipped count in `legacy_readings_progress`:
-
-```sql
-SELECT table_name, last_id, copied, skipped FROM legacy_readings_progress;
-SELECT COUNT(*) FROM `ESP_2EB804`;
-```
-
-The copied rows are not all still in `readings`. Seconds after the copy, the backend's startup retention pass deletes every Reading older than `RETENTION_DAYS` (90 by default), copied ones included. So for a Device with more history than that, `copied` is larger than its count in `readings`, and that is correct. Compare inside the retention window instead, from a whole local day inside it, `CUTOFF_DAY` (the first start of the new backend minus 89 days, as `YYYY-MM-DD`), up to that first start, `FIRST_START` in UTC (reflashed boards start adding new Readings at once):
-
-```sql
-SELECT COUNT(*) FROM readings r JOIN devices d ON d.id = r.device_id
- WHERE d.hostname = 'ESP_2EB804'
-   AND CONVERT_TZ(r.recorded_at, '+00:00', '-06:00') >= 'CUTOFF_DAY'
-   AND r.recorded_at < 'FIRST_START';
-SELECT COUNT(*) FROM `ESP_2EB804` WHERE STR_TO_DATE(`DATE`, '%m/%d/%Y') >= 'CUTOFF_DAY';
-```
-
-The two should agree, less the rows from that window logged as `legacy:` skips, give or take the Readings of one hour at the cutoff (the fixed `-06:00` is Central standard time; it is an hour off in summer). Both old writers stored `DATE` as `m/d/Y`; use `'%Y-%m-%d'` for a table that holds ISO dates. Leave out the `FIRST_START` bound if `migrate:legacy` copied rows added after the first start.
-
-Then compare one legacy row with its reading, rendered back in the legacy zone, to confirm the timestamps read the right way round:
-
-```sql
-SELECT DATE, TIME, TEMP FROM `ESP_2EB804` ORDER BY ID DESC LIMIT 1;
-SELECT CONVERT_TZ(r.recorded_at, '+00:00', 'America/Chicago') AS local_time, r.temp_f
-  FROM readings r JOIN devices d ON d.id = r.device_id
- WHERE d.hostname = 'ESP_2EB804' ORDER BY r.recorded_at DESC LIMIT 1;
-```
-
-Once the counts agree, drop the legacy tables by hand, one `DROP TABLE` per `ESP_xxxxxx` table plus `legacy_devices`, `legacy_locations`, `alarms`, and `legacy_readings_progress`. Take a backup first. `CONVERT_TZ` with a named zone needs the MySQL time zone tables loaded (`mysql_tzinfo_to_sql /usr/share/zoneinfo | mysql mysql` as root; the MySQL image ships without zoneinfo); use a fixed offset like `'-06:00'` otherwise.
-
 ## Manual install (without Docker)
 
 The fallback for a server that cannot run Docker. A single Ubuntu server runs everything: nginx serves the built frontend and proxies `/api/` to the backend, PM2 keeps the backend running as one process, and MySQL holds the data. Replace `/path/to/frontend/dist` with wherever you copy the frontend build.
@@ -546,7 +471,7 @@ GRANT ALL PRIVILEGES ON temperature_alarms.* TO 'tempuser'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
-The backend creates and upgrades the schema itself: every start runs its migration runner, which applies whatever has not run yet and records it in `schema_migrations`. A fresh database needs nothing beyond the `CREATE DATABASE` above. An old database is converted on the first start; see [Upgrading a database from the old per-Device tables](#upgrading-a-database-from-the-old-per-device-tables), and watch `pm2 logs temperature-api` for the `legacy:` lines.
+The backend creates and upgrades the schema itself: every start runs its migration runner, which applies whatever has not run yet and records it in `schema_migrations`. A fresh database needs nothing beyond the `CREATE DATABASE` above.
 
 ### 3. Clone and build
 
@@ -575,7 +500,7 @@ The backend refuses to start until these are set, naming whatever is missing:
 | `ADMIN_TOKEN`, `DEVICE_TOKEN` | The two shared secrets, as in the Compose [setup](#setup) table. `DEVICE_TOKEN_PREVIOUS`, set only during a [rotation](#rotating-the-device-token), is the old Device token still accepted; set it to the old value, put the new one in `DEVICE_TOKEN`, `pm2 restart`, and clear it once every board reports with the new one |
 | `SMTP_HOST` and the rest | Optional [email notifications](#email-notifications), listed commented at the end of `backend/.env.example`; off while `SMTP_HOST` is unset |
 
-`CORS_ORIGIN` can stay unset: through the nginx below the dashboard and the API share one origin, which the backend always accepts. Set it only if the dashboard is served from somewhere else. Leave `REPORT_INTERVAL_SECONDS` at 30 unless the firmware interval changes with it, and set `LEGACY_TIME_ZONE` only when upgrading an old database (step 2). Every other setting has a default that `.env.example` shows.
+`CORS_ORIGIN` can stay unset: through the nginx below the dashboard and the API share one origin, which the backend always accepts. Set it only if the dashboard is served from somewhere else. Leave `REPORT_INTERVAL_SECONDS` at 30 unless the firmware interval changes with it. Every other setting has a default that `.env.example` shows.
 
 #### Frontend
 

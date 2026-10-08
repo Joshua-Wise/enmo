@@ -32,7 +32,7 @@ export interface RetentionOptions {
 export interface RetentionJob {
   /**
    * Stop the schedule, and a pass in flight after the batch it is deleting; resolves once it has.
-   * A long pass (the first after a legacy migration) would otherwise outlast a shutdown.
+   * A long pass (the first after a long outage) would otherwise outlast a shutdown.
    */
   stop(): Promise<void>;
 }
@@ -97,7 +97,7 @@ export function startRetentionJob(deps: RetentionDeps, options: RetentionOptions
   const stopping = new AbortController();
   let inFlight: Promise<unknown> | undefined;
 
-  // Passes never overlap: a tick during a long pass (the first after a legacy migration) is skipped.
+  // Passes never overlap: a tick during a long pass (the first after a long outage) is skipped.
   const tick = () => {
     if (inFlight !== undefined) return;
     inFlight = deleteReadingsPastWindow(deps, { ...options, signal: stopping.signal })

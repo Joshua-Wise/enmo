@@ -15,7 +15,7 @@ export const latestAllowed = (now: Date): Date => new Date(now.getTime() + FUTUR
 /**
  * When a Device last reported, at `now` (docs/adr/0009): the later of `devices.last_report_at`,
  * which ingest sets for a Reading and a fault report alike, and its latest Reading, since a
- * Reading written straight to the table (the demo's backfill, a legacy import) is a report too.
+ * Reading written straight to the table (the demo's backfill) is a report too.
  * A stored time past latestAllowed(now) is passed over, as a future Reading is: a board that
  * reported during a clock step and then fell silent still goes Offline on time.
  */

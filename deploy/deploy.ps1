@@ -20,7 +20,7 @@ $ExamplePath = Join-Path $RepoDir '.env.example'
 $BackupDir = Join-Path $RepoDir 'backups'
 $DbName = 'temperature_alarms'
 $Secrets = @('ADMIN_TOKEN', 'DEVICE_TOKEN', 'DB_PASSWORD', 'DB_ROOT_PASSWORD')
-$Tunables = @('REPORT_INTERVAL_SECONDS', 'RETENTION_DAYS', 'HOT_WARNING_F', 'HOT_CRITICAL_F', 'COLD_WARNING_F', 'DRY_WARNING_PERCENT', 'MISSED_REPORTS_BEFORE_OFFLINE', 'LEGACY_TIME_ZONE', 'TZ', 'DB_BUFFER_POOL_SIZE', 'NOTIFY_COALESCE_SECONDS', 'NOTIFY_TO_ALL')
+$Tunables = @('REPORT_INTERVAL_SECONDS', 'RETENTION_DAYS', 'HOT_WARNING_F', 'HOT_CRITICAL_F', 'COLD_WARNING_F', 'DRY_WARNING_PERCENT', 'MISSED_REPORTS_BEFORE_OFFLINE', 'TZ', 'DB_BUFFER_POOL_SIZE', 'NOTIFY_COALESCE_SECONDS', 'NOTIFY_TO_ALL')
 # Email notifications (docs/adr/0008): off while SMTP_HOST is empty. Set with the --smtp-* and --notify-*
 # flags or the install prompts, never with --set; the password never comes from the command line.
 $NotifyKeys = @('SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASSWORD', 'NOTIFY_FROM', 'NOTIFY_TO', 'PUBLIC_URL', 'NOTIFY_REMIND_HOURS', 'NOTIFY_MONTHLY_REPORT', 'NOTIFY_QUIET_HOURS', 'NOTIFY_QUIET_WEEKENDS')
@@ -83,7 +83,6 @@ With no action at a console, shows a menu. Actions:
   schedule-backup    Linux and macOS servers (--host): nightly backup from cron (--at HH:MM,
   unschedule-backup  --keep-days N). On Windows it prints the Task Scheduler line instead.
   restore [FILE]     Replace the database with a backup (typed confirmation; backs up first)
-  migrate-legacy     Back up, then run `npm run migrate:legacy` in api
   info               The URL, the tokens (masked unless --reveal), and the config.h lines
   rotate-device-token  Start a Device token rotation: the current token becomes
                      DEVICE_TOKEN_PREVIOUS, still accepted, and a new DEVICE_TOKEN is generated;
@@ -365,7 +364,6 @@ function Test-Setting([string]$Key, [string]$Value) {
     switch ($Key) {
         'WEB_PORT' { return $Value -match '^([0-9.]+:|\[[0-9a-fA-F:]+\]:)?[0-9]{1,5}$' }
         'TRUST_PROXY' { return Test-TrustProxy $Value }
-        'LEGACY_TIME_ZONE' { return ($Value -eq '') -or ($Value -match '^[A-Za-z0-9_/+:-]+$') }
         # An IANA zone like America/Chicago, one this host knows when it keeps the zone files; api refuses
         # one Node does not know at startup.
         'TZ' {
@@ -668,7 +666,7 @@ function Read-Tunables {
                 if (Test-Setting $k $value) { break }
                 Warn "'$value' is not valid for $k"
             }
-            if ($k -in @('LEGACY_TIME_ZONE', 'TZ', 'DB_BUFFER_POOL_SIZE', 'NOTIFY_COALESCE_SECONDS', 'NOTIFY_TO_ALL') -and -not $value) { continue }
+            if ($k -in @('TZ', 'DB_BUFFER_POOL_SIZE', 'NOTIFY_COALESCE_SECONDS', 'NOTIFY_TO_ALL') -and -not $value) { continue }
             Set-EnvValue $k $value
         }
     }
@@ -1064,15 +1062,6 @@ function Invoke-Restore {
     if (-not (Test-Health 30)) { Fail 'unhealthy after the restore' }
 }
 
-function Invoke-MigrateLegacy {
-    if (-not (Test-Running 'api')) { Fail 'api is not running; start the stack first (deploy.ps1 deploy)' }
-    Invoke-Backup
-    Step 'Legacy migration (npm run migrate:legacy)'
-    Invoke-Dc exec -T api npm run migrate:legacy
-    if ($LASTEXITCODE -ne 0) { Fail 'the legacy migration failed; see the lines above and DEPLOYMENT.md' }
-    Write-Host "Each 'legacy:' line names a row it skipped. Verify the counts as DEPLOYMENT.md describes."
-}
-
 function Hide-Secret([string]$Value) {
     if ($O.Reveal) { return $Value }
     if ($Value.Length -le 8) { return '********' }
@@ -1327,7 +1316,6 @@ function Invoke-Action([string]$Name) {
         'logs' { Invoke-Logs }
         'backup' { Invoke-Backup }
         'restore' { Invoke-Restore }
-        'migrate-legacy' { Invoke-MigrateLegacy }
         'info' { Invoke-Info }
         'rotate-device-token' { Invoke-RotateDeviceToken }
         'publish-firmware' { Invoke-PublishFirmware }
@@ -1344,26 +1332,26 @@ function Invoke-Action([string]$Name) {
 
 function Show-Menu {
     $map = @{ '1' = 'preflight'; '2' = 'install'; '3' = 'deploy'; '4' = 'status'; '5' = 'logs'; '6' = 'backup'
-        '7' = 'restore'; '8' = 'migrate-legacy'; '9' = 'info'; '10' = 'stop'; '11' = 'uninstall'; '12' = 'demo'
-        '13' = 'rotate-device-token'; '14' = 'rotate-device-token'; '15' = 'firmware-status'; '16' = 'publish-firmware' }
+        '7' = 'restore'; '8' = 'info'; '9' = 'stop'; '10' = 'uninstall'; '11' = 'demo'
+        '12' = 'rotate-device-token'; '13' = 'rotate-device-token'; '14' = 'firmware-status'; '15' = 'publish-firmware' }
     while ($true) {
         Write-Host ''
         Write-Line "Temperature Alarms deploy  $RepoDir  (project $(Get-ProjectName), port $(Get-WebPortSetting))" 'Cyan'
         Write-Host '   1) Preflight checks          7) Restore the database'
-        Write-Host '   2) First install (.env)      8) Run the legacy migration'
-        Write-Host '   3) Deploy / upgrade          9) Show URL and tokens'
-        Write-Host '   4) Status                   10) Stop'
-        Write-Host '   5) Logs                     11) Uninstall'
-        Write-Host '   6) Back up the database     12) Demo, no hardware needed'
-        Write-Host '  13) Rotate the Device token  14) Finish the Device token rotation'
-        Write-Host '  15) Firmware status          16) Publish firmware (asks for the file)'
+        Write-Host '   2) First install (.env)      8) Show URL and tokens'
+        Write-Host '   3) Deploy / upgrade          9) Stop'
+        Write-Host '   4) Status                   10) Uninstall'
+        Write-Host '   5) Logs                     11) Demo, no hardware needed'
+        Write-Host '   6) Back up the database'
+        Write-Host '  12) Rotate the Device token  13) Finish the Device token rotation'
+        Write-Host '  14) Firmware status          15) Publish firmware (asks for the file)'
         Write-Host '                                q) Quit'
         $choice = Read-Host '  Choose'
         if ($null -eq $choice -or $choice -in @('q', 'quit', 'exit')) { return }
         if (-not $map.ContainsKey($choice.Trim())) { Warn 'no such choice'; continue }
         $action = $map[$choice.Trim()]
-        $O.Finish = ($choice.Trim() -eq '14')
-        if ($choice.Trim() -eq '16') { $O.File = Ask 'The .bin.signed to publish' '' }
+        $O.Finish = ($choice.Trim() -eq '13')
+        if ($choice.Trim() -eq '15') { $O.File = Ask 'The .bin.signed to publish' '' }
         try { Set-LegacyRootEnv; Invoke-Action $action }
         catch { Write-Line "Error: $($_.Exception.Message)" 'Red'; Warn "$action did not finish" }
         $O.File = ''; $O.Reveal = $false; $O.Wipe = $false; $O.Down = $false; $O.Finish = $false; $O.Only = ''

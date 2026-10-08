@@ -86,7 +86,7 @@ export function selectDayMaxima(deviceIds: number[], days: LocalDay[], first: nu
 /**
  * How long the completed days' maxima are reused. A week of Readings is most of what the overview
  * reads (about 20,000 a Device), and a finished day only changes when a history is reset or rows
- * are written straight to the table (the demo's backfill, a legacy import), so a few minutes stale
+ * are written straight to the table (the demo's backfill), so a few minutes stale
  * is the price of not reading them on every request. Today is always read fresh.
  */
 export const PAST_DAYS_CACHE_MS = 5 * 60_000;

@@ -1,4 +1,4 @@
-/** What a Device needs before it can be inserted: the rules the API and the legacy migration share. */
+/** What a Device needs before it can be inserted: the rules the API applies. */
 
 interface DeviceInput {
   hostname: string;

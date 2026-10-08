@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   }
 
   const pool = createPool(config.database);
-  const applied = await runMigrations(pool, { context: migrationContext(config) });
+  const applied = await runMigrations(pool, { context: migrationContext() });
   if (applied.length > 0) console.log(`Applied migrations: ${applied.join(', ')}`);
 
   // One client set, shared by the routes and the Offline sweep, so both reach every dashboard.

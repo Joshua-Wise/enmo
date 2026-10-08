@@ -16,7 +16,7 @@ ENV_FILE=".env"
 BACKUP_DIR="backups"
 DB_NAME="temperature_alarms"
 SECRETS="ADMIN_TOKEN DEVICE_TOKEN DB_PASSWORD DB_ROOT_PASSWORD"
-TUNABLES="REPORT_INTERVAL_SECONDS RETENTION_DAYS HOT_WARNING_F HOT_CRITICAL_F COLD_WARNING_F DRY_WARNING_PERCENT MISSED_REPORTS_BEFORE_OFFLINE LEGACY_TIME_ZONE TZ DB_BUFFER_POOL_SIZE NOTIFY_COALESCE_SECONDS NOTIFY_TO_ALL"
+TUNABLES="REPORT_INTERVAL_SECONDS RETENTION_DAYS HOT_WARNING_F HOT_CRITICAL_F COLD_WARNING_F DRY_WARNING_PERCENT MISSED_REPORTS_BEFORE_OFFLINE TZ DB_BUFFER_POOL_SIZE NOTIFY_COALESCE_SECONDS NOTIFY_TO_ALL"
 # Email notifications (docs/adr/0008): off while SMTP_HOST is empty. Set with the --smtp-* and --notify-*
 # flags or the install prompts, never with --set; the password never comes from the command line.
 NOTIFY_KEYS="SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USER SMTP_PASSWORD NOTIFY_FROM NOTIFY_TO PUBLIC_URL NOTIFY_REMIND_HOURS NOTIFY_MONTHLY_REPORT NOTIFY_QUIET_HOURS NOTIFY_QUIET_WEEKENDS"
@@ -113,7 +113,6 @@ With no action and a terminal, shows a menu. Actions:
                      default 7). Replaces its own crontab line; other lines are left alone.
   unschedule-backup  Remove that crontab line
   restore [FILE]     Replace the database with a backup (typed confirmation; backs up first)
-  migrate-legacy     Back up, then run `npm run migrate:legacy` in api
   info               The URL, the tokens (masked unless --reveal), and the config.h lines
   rotate-device-token  Start a Device token rotation: the current token becomes
                      DEVICE_TOKEN_PREVIOUS, still accepted, and a new DEVICE_TOKEN is generated;
@@ -384,7 +383,6 @@ valid_tunable() {
   case "$1" in
     WEB_PORT) printf '%s' "$2" | grep -Eq '^([0-9.]+:|\[[0-9a-fA-F:]+\]:)?[0-9]{1,5}$' ;;
     TRUST_PROXY) valid_trust_proxy "$2" ;;
-    LEGACY_TIME_ZONE) [ -z "$2" ] || printf '%s' "$2" | grep -Eq '^[A-Za-z0-9_/+:-]+$' ;;
     # An IANA zone like America/Chicago, one this host knows when it keeps the zone files; api refuses
     # one Node does not know at startup.
     TZ) [ -z "$2" ] || { printf '%s' "$2" | grep -Eqx '[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*' \
@@ -710,7 +708,7 @@ prompt_tunables() {
         valid_tunable "$k" "$value" && break
         warn "'$value' is not valid for $k"
       done
-      if { [ "$k" = LEGACY_TIME_ZONE ] || [ "$k" = TZ ] || [ "$k" = DB_BUFFER_POOL_SIZE ] || [ "$k" = NOTIFY_COALESCE_SECONDS ] || [ "$k" = NOTIFY_TO_ALL ]; } && [ -z "$value" ]; then continue; fi
+      if { [ "$k" = TZ ] || [ "$k" = DB_BUFFER_POOL_SIZE ] || [ "$k" = NOTIFY_COALESCE_SECONDS ] || [ "$k" = NOTIFY_TO_ALL ]; } && [ -z "$value" ]; then continue; fi
       env_set "$k" "$value"
     done
   fi
@@ -1117,14 +1115,6 @@ do_restore() {
   # The restored database knows only the backups before its own; the one just made is the latest.
   record_backup
   health 30
-}
-
-do_migrate_legacy() {
-  running api || die "api is not running; start the stack first (deploy.sh deploy)"
-  do_backup
-  step "Legacy migration (npm run migrate:legacy)"
-  dc exec -T api npm run migrate:legacy || die "the legacy migration failed; see the lines above and DEPLOYMENT.md"
-  say "Each 'legacy:' line names a row it skipped. Verify the counts as DEPLOYMENT.md describes."
 }
 
 mask() {
@@ -1584,7 +1574,6 @@ run_action() {
     logs) do_logs ;;
     backup) do_backup ;;
     restore) do_restore ;;
-    migrate-legacy) do_migrate_legacy ;;
     info) do_info ;;
     rotate-device-token) do_rotate_device_token ;;
     publish-firmware) do_publish_firmware ;;
@@ -1601,24 +1590,24 @@ menu() {
   local choice action
   while :; do
     printf '\n%sTemperature Alarms deploy%s  %s  (project %s, port %s)\n' "$C_BOLD" "$C_OFF" "$REPO_DIR" "$(project_name)" "$(web_port_setting)"
-    say "   1) Preflight checks          8) Run the legacy migration"
-    say "   2) First install (.env)      9) Show URL and tokens"
-    say "   3) Deploy / upgrade         10) Stop"
-    say "   4) Status                   11) Uninstall"
-    say "   5) Logs                     12) Bootstrap this server (Docker, git, cron)"
-    say "   6) Back up the database     13) Schedule a nightly backup"
-    say "   7) Restore the database     14) Unschedule the nightly backup"
-    say "  15) Demo, no hardware needed 16) Rotate the Device token"
-    say "  17) Finish the Device token rotation    18) Firmware status"
-    say "  19) Publish firmware (asks for the file)  q) Quit"
+    say "   1) Preflight checks          8) Show URL and tokens"
+    say "   2) First install (.env)      9) Stop"
+    say "   3) Deploy / upgrade         10) Uninstall"
+    say "   4) Status                   11) Bootstrap this server (Docker, git, cron)"
+    say "   5) Logs                     12) Schedule a nightly backup"
+    say "   6) Back up the database     13) Unschedule the nightly backup"
+    say "   7) Restore the database     14) Demo, no hardware needed"
+    say "  15) Rotate the Device token  16) Finish the Device token rotation"
+    say "  17) Firmware status          18) Publish firmware (asks for the file)"
+    say "   q) Quit"
     read -r -p "  Choose: " choice || exit 0
     case "$choice" in
       1) action=preflight ;; 2) action=install ;; 3) action=deploy ;; 4) action=status ;;
-      5) action=logs ;; 6) action=backup ;; 7) action=restore ;; 8) action=migrate-legacy ;;
-      9) action=info ;; 10) action=stop ;; 11) action=uninstall ;; 12) action=bootstrap ;;
-      13) action=schedule-backup ;; 14) action=unschedule-backup ;; 15) action=demo ;;
-      16) action=rotate-device-token ;; 17) action=rotate-device-token; FINISH=1 ;;
-      18) action=firmware-status ;; 19) action=publish-firmware; FILE=$(ask "The .bin.signed to publish" "") ;;
+      5) action=logs ;; 6) action=backup ;; 7) action=restore ;; 8) action=info ;;
+      9) action=stop ;; 10) action=uninstall ;; 11) action=bootstrap ;; 12) action=schedule-backup ;;
+      13) action=unschedule-backup ;; 14) action=demo ;; 15) action=rotate-device-token ;;
+      16) action=rotate-device-token; FINISH=1 ;; 17) action=firmware-status ;;
+      18) action=publish-firmware; FILE=$(ask "The .bin.signed to publish" "") ;;
       q|Q|quit|exit) exit 0 ;;
       *) warn "no such choice"; continue ;;
     esac

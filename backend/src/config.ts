@@ -1,6 +1,6 @@
 import type { DatabaseConfig } from './db';
 import { DEFAULT_THRESHOLDS, type Thresholds } from './conditions';
-import { isTimeZone, serverTimeZone } from './localDay';
+import { isTimeZone } from './localDay';
 import { parseDailyWindow, type QuietHours } from './quietHours';
 
 /** Everything the backend reads from the environment, read once at startup. */
@@ -24,8 +24,6 @@ export interface Config {
   retentionDays: number;
   /** Where Hot, Cold, Dry, and Offline begin. Mold risk is a fixed rule (see conditions.ts). */
   thresholds: Thresholds;
-  /** Zone the old per-Device tables' string timestamps were written in (docs/adr/0002). */
-  legacyTimeZone: string;
   /** Where Incident emails go and through which relay (docs/adr/0008). Undefined when SMTP_HOST is unset: notifications are off. */
   notifications: NotificationsConfig | undefined;
 }
@@ -125,14 +123,6 @@ function thresholds(env: Env): Thresholds {
     throw new ConfigError(`COLD_WARNING_F (${t.coldWarningF}) must be below HOT_WARNING_F (${t.hotWarningF})`);
   }
   return t;
-}
-
-/** An IANA zone from the environment, or the server's own zone when unset. */
-function timeZone(env: Env, name: string): string {
-  const raw = present(env, name);
-  if (raw === undefined) return serverTimeZone();
-  if (!isTimeZone(raw)) throw new ConfigError(`${name} must be an IANA time zone like America/Chicago, got "${raw}"`);
-  return raw;
 }
 
 /** A bare address, `name@host.tld`: no display name, no spaces, nothing a header could be split on. */
@@ -288,7 +278,6 @@ export function loadConfig(env: Env = process.env): Config {
     reportIntervalSeconds: positiveInteger(env, 'REPORT_INTERVAL_SECONDS', 30),
     retentionDays: positiveInteger(env, 'RETENTION_DAYS', 90),
     thresholds: thresholds(env),
-    legacyTimeZone: timeZone(env, 'LEGACY_TIME_ZONE'),
     notifications: notifications(env),
   };
 }

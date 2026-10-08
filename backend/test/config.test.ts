@@ -31,7 +31,6 @@ describe('loadConfig', () => {
     assert.equal(config.reportIntervalSeconds, 30);
     assert.equal(config.retentionDays, 90);
     assert.deepEqual(config.thresholds, DEFAULT_THRESHOLDS);
-    assert.equal(config.legacyTimeZone, Intl.DateTimeFormat().resolvedOptions().timeZone);
   });
 
   test('honours every optional override', () => {
@@ -48,7 +47,6 @@ describe('loadConfig', () => {
       COLD_WARNING_F: '-10',
       DRY_WARNING_PERCENT: '25',
       MISSED_REPORTS_BEFORE_OFFLINE: '5',
-      LEGACY_TIME_ZONE: 'America/Chicago',
     });
     assert.equal(config.port, 4000);
     assert.equal(config.corsOrigin, 'https://example.test');
@@ -57,11 +55,6 @@ describe('loadConfig', () => {
     assert.equal(config.reportIntervalSeconds, 60);
     assert.equal(config.retentionDays, 30);
     assert.deepEqual(config.thresholds, { hotWarningF: 80, hotCriticalF: 95, coldWarningF: -10, dryWarningPercent: 25, missedReportsBeforeOffline: 5 });
-    assert.equal(config.legacyTimeZone, 'America/Chicago');
-  });
-
-  test('rejects a legacy time zone the runtime does not know', () => {
-    assert.throws(() => loadConfig({ ...complete, LEGACY_TIME_ZONE: 'Chicago' }), /LEGACY_TIME_ZONE/);
   });
 
   test('TZ, the server\'s zone, may be any zone the runtime knows, and is refused otherwise rather than silently UTC', () => {

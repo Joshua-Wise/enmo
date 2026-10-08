@@ -447,7 +447,7 @@ function summarise(values: number[]): DaySummary | null {
 /**
  * Most Readings one History response carries (docs/adr/0004: a date range and a row limit).
  * A 25-hour day at the ingest limit of 20 a minute is 30,000, so only rows the ingest route
- * never wrote (a legacy import, a test board) can pass it. Past it the day's first Readings
+ * never wrote (a test board) can pass it. Past it the day's first Readings
  * are sent and `truncated` says so; the summary covers what was sent.
  */
 export const HISTORY_ROW_LIMIT = 30_000;

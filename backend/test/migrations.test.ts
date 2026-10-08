@@ -46,10 +46,7 @@ describe('migration runner', () => {
     assert.deepEqual(await tableNames(pool), ['campuses', 'devices', 'firmware_release', 'incident_segments', 'incidents', 'last_backup', 'monthly_reports', 'notifications', 'pending_devices', 'readings', 'schema_migrations']);
     const [rows] = await pool.query<RowDataPacket[]>('SELECT id FROM schema_migrations ORDER BY id');
     assert.deepEqual(rows.map((r) => r.id), [
-      '0000-legacy-tables-aside',
       '0001-initial-schema',
-      '0002-legacy-campuses-and-devices',
-      '0003-legacy-readings',
       '0004-readings-recorded-at-index',
       '0005-incidents',
       '0006-readings-covering-index',
@@ -74,7 +71,7 @@ describe('migration runner', () => {
     const applied = await runMigrations(pool);
     assert.deepEqual(applied, []);
     const [rows] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) AS n FROM schema_migrations');
-    assert.equal(rows[0].n, 21);
+    assert.equal(rows[0].n, 18);
   });
 
   test('applies only migrations that have not run yet, in order', async () => {

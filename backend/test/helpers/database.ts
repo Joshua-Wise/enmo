@@ -60,5 +60,5 @@ export async function dropAllTables(pool: Pool): Promise<void> {
 /** Drop every table in the test database and rebuild the schema through the migration runner. */
 export async function resetDatabase(pool: Pool): Promise<void> {
   await dropAllTables(pool);
-  await runMigrations(pool, { context: { legacyTimeZone: 'UTC', log: () => {} } });
+  await runMigrations(pool, { context: { log: () => {} } });
 }
