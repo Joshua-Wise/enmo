@@ -258,6 +258,8 @@ jobs:
         with:
           context: ${{ matrix.context }}
           push: ${{ env.PUBLISH == 'true' }}
+          # Always fetch the newest base images, so the layer cache can't keep an unpatched Node or nginx.
+          pull: true
           # The commit, for Settings, System (the api reads it; the frontend ignores it).
           build-args: APP_VERSION=${{ github.sha }}
           tags: |
